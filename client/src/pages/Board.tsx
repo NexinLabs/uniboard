@@ -31,7 +31,16 @@ interface Element {
     toId?: string;
     fromPoint?: ConnectionPoint;
     toPoint?: ConnectionPoint;
+    // New properties
+    fontSize?: number;
+    textAlign?: 'center' | 'left' | 'right';
+    arrowType?: 'straight' | 'elbow' | 'curved';
+    lineStyle?: 'solid' | 'dashed' | 'dotted';
+    lineWidth?: number;
+    arrowHead?: 'none' | 'start' | 'end' | 'both';
 }
+
+type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
 const Board = () => {
     const { id } = useParams();
@@ -56,10 +65,61 @@ const Board = () => {
     const [dragOffset, setDragOffset] = useState<{ x: number, y: number } | null>(null);
     const [arrowStart, setArrowStart] = useState<{ elementId: string, point: ConnectionPoint } | null>(null);
     const [hoveredConnectionPoint, setHoveredConnectionPoint] = useState<{ elementId: string, point: ConnectionPoint } | null>(null);
+    
+    // New state for advanced features
+    const [editingElementId, setEditingElementId] = useState<string | null>(null);
+    const [resizeHandle, setResizeHandle] = useState<ResizeHandle | null>(null);
+    const [contextMenu, setContextMenu] = useState<{ x: number, y: number, elementId: string } | null>(null);
 
     const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState(false);
     const zoom = 1;
+
+    const getResizeHandles = (el: Element): { type: ResizeHandle, x: number, y: number }[] => {
+        if (el.type === 'rect' || el.type === 'image') {
+            const x = el.x;
+            const y = el.y;
+            const w = el.w || 0;
+            const h = el.h || 0;
+            return [
+                { type: 'nw', x, y },
+                { type: 'n', x: x + w / 2, y },
+                { type: 'ne', x: x + w, y },
+                { type: 'e', x: x + w, y: y + h / 2 },
+                { type: 'se', x: x + w, y: y + h },
+                { type: 's', x: x + w / 2, y: y + h },
+                { type: 'sw', x, y: y + h },
+                { type: 'w', x, y: y + h / 2 },
+            ];
+        } else if (el.type === 'circle') {
+             const r = el.radius || 0;
+             const x = el.x - r;
+             const y = el.y - r;
+             const w = r * 2;
+             const h = r * 2;
+             return [
+                { type: 'nw', x, y },
+                { type: 'ne', x: x + w, y },
+                { type: 'se', x: x + w, y: y + h },
+                { type: 'sw', x, y: y + h },
+             ];
+        }
+        return [];
+    };
+
+    const getCursorForHandle = (handle: ResizeHandle) => {
+        switch (handle) {
+            case 'nw': return 'nw-resize';
+            case 'n': return 'n-resize';
+            case 'ne': return 'ne-resize';
+            case 'e': return 'e-resize';
+            case 'se': return 'se-resize';
+            case 's': return 's-resize';
+            case 'sw': return 'sw-resize';
+            case 'w': return 'w-resize';
+            default: return 'default';
+        }
+    };
 
     useEffect(() => {
         const fetchBoard = async () => {
@@ -201,26 +261,58 @@ const Board = () => {
             const toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
 
             ctx.strokeStyle = el.color || 'white';
-            ctx.lineWidth = selectedElements.includes(el.id) ? 3 : 2;
-            ctx.beginPath();
-            ctx.moveTo(fromPoint.x, fromPoint.y);
-            ctx.lineTo(toPoint.x, toPoint.y);
-            ctx.stroke();
+            ctx.lineWidth = (el.lineWidth || 2) + (selectedElements.includes(el.id) ? 1 : 0);
+            
+            if (el.lineStyle === 'dashed') ctx.setLineDash([10, 5]);
+            else if (el.lineStyle === 'dotted') ctx.setLineDash([2, 4]);
+            else ctx.setLineDash([]);
 
-            const angle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x);
-            const headLength = 15;
             ctx.beginPath();
-            ctx.moveTo(toPoint.x, toPoint.y);
-            ctx.lineTo(
-                toPoint.x - headLength * Math.cos(angle - Math.PI / 6),
-                toPoint.y - headLength * Math.sin(angle - Math.PI / 6)
-            );
-            ctx.moveTo(toPoint.x, toPoint.y);
-            ctx.lineTo(
-                toPoint.x - headLength * Math.cos(angle + Math.PI / 6),
-                toPoint.y - headLength * Math.sin(angle + Math.PI / 6)
-            );
+            
+            let endAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x);
+
+            if (el.arrowType === 'elbow') {
+                const midX = (fromPoint.x + toPoint.x) / 2;
+                ctx.moveTo(fromPoint.x, fromPoint.y);
+                ctx.lineTo(midX, fromPoint.y);
+                ctx.lineTo(midX, toPoint.y);
+                ctx.lineTo(toPoint.x, toPoint.y);
+                
+                if (Math.abs(fromPoint.y - toPoint.y) > 0) {
+                     endAngle = toPoint.y > fromPoint.y ? Math.PI / 2 : -Math.PI / 2;
+                } else {
+                     endAngle = toPoint.x > fromPoint.x ? 0 : Math.PI;
+                }
+            } else if (el.arrowType === 'curved') {
+                const dx = toPoint.x - fromPoint.x;
+                const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
+                const controlPoint2 = { x: toPoint.x - dx / 2, y: toPoint.y };
+                ctx.moveTo(fromPoint.x, fromPoint.y);
+                ctx.bezierCurveTo(controlPoint1.x, controlPoint1.y, controlPoint2.x, controlPoint2.y, toPoint.x, toPoint.y);
+                // Approximate end angle for bezier
+                endAngle = Math.atan2(toPoint.y - controlPoint2.y, toPoint.x - controlPoint2.x);
+            } else {
+                ctx.moveTo(fromPoint.x, fromPoint.y);
+                ctx.lineTo(toPoint.x, toPoint.y);
+            }
             ctx.stroke();
+            ctx.setLineDash([]);
+
+            const headLength = 15;
+            if (el.arrowHead === 'end' || el.arrowHead === 'both' || !el.arrowHead) {
+                ctx.beginPath();
+                ctx.moveTo(toPoint.x, toPoint.y);
+                ctx.lineTo(
+                    toPoint.x - headLength * Math.cos(endAngle - Math.PI / 6),
+                    toPoint.y - headLength * Math.sin(endAngle - Math.PI / 6)
+                );
+                ctx.moveTo(toPoint.x, toPoint.y);
+                ctx.lineTo(
+                    toPoint.x - headLength * Math.cos(endAngle + Math.PI / 6),
+                    toPoint.y - headLength * Math.sin(endAngle + Math.PI / 6)
+                );
+                ctx.stroke();
+            }
         });
 
         elements.filter(el => el.type !== 'arrow').forEach(el => {
@@ -247,6 +339,14 @@ const Board = () => {
                 ctx.closePath();
                 ctx.stroke();
 
+                if (el.text && el.id !== editingElementId) {
+                    ctx.fillStyle = el.color || 'white';
+                    ctx.font = `${el.fontSize || 16}px Arial`;
+                    ctx.textAlign = el.textAlign || 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(el.text, x + w/2, y + h/2);
+                }
+
                 if (tool === 'arrow' || isSelected) {
                     getConnectionPoints(el).forEach(point => {
                         const isHovered = hoveredConnectionPoint?.elementId === el.id &&
@@ -267,6 +367,14 @@ const Board = () => {
                 ctx.arc(el.x, el.y, el.radius || 0, 0, 2 * Math.PI);
                 ctx.stroke();
 
+                if (el.text && el.id !== editingElementId) {
+                    ctx.fillStyle = el.color || 'white';
+                    ctx.font = `${el.fontSize || 16}px Arial`;
+                    ctx.textAlign = el.textAlign || 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(el.text, el.x, el.y);
+                }
+
                 if (tool === 'arrow' || isSelected) {
                     getConnectionPoints(el).forEach(point => {
                         const isHovered = hoveredConnectionPoint?.elementId === el.id &&
@@ -283,6 +391,8 @@ const Board = () => {
             } else if (el.type === 'text') {
                 ctx.fillStyle = el.color || 'white';
                 ctx.font = '16px Arial';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'alphabetic';
                 ctx.fillText(el.text || '', el.x, el.y);
                 if (isSelected) {
                     ctx.strokeStyle = '#60a5fa';
@@ -300,6 +410,19 @@ const Board = () => {
                         ctx.strokeRect(el.x, el.y, el.w || 200, el.h || 200);
                     }
                 }
+            }
+
+            if (isSelected && (el.type === 'rect' || el.type === 'circle' || el.type === 'image')) {
+                const handles = getResizeHandles(el);
+                handles.forEach(handle => {
+                    ctx.fillStyle = 'white';
+                    ctx.strokeStyle = '#3b82f6';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.rect(handle.x - 4, handle.y - 4, 8, 8);
+                    ctx.fill();
+                    ctx.stroke();
+                });
             }
         });
 
@@ -353,7 +476,7 @@ const Board = () => {
         }
 
         ctx.restore();
-    }, [elements, isDrawing, startPos, currentPos, tool, selectedElements, panOffset, zoom, arrowStart, hoveredConnectionPoint]);
+    }, [elements, isDrawing, startPos, currentPos, tool, selectedElements, panOffset, zoom, arrowStart, hoveredConnectionPoint, editingElementId]);
 
     const getCanvasCoords = (e: React.MouseEvent) => {
         const canvas = canvasRef.current;
@@ -410,8 +533,128 @@ const Board = () => {
         return null;
     };
 
+    const handleDoubleClick = (e: React.MouseEvent) => {
+        const { x, y } = getCanvasCoords(e);
+        const element = getElementAtPosition(x, y);
+        if (element && (element.type === 'rect' || element.type === 'circle')) {
+            setEditingElementId(element.id);
+            setTool('select');
+        }
+    };
+
+    const handleContextMenu = (e: React.MouseEvent) => {
+        e.preventDefault();
+        const { x, y } = getCanvasCoords(e);
+        
+        const clickedArrow = elements.find(el => {
+            if (el.type !== 'arrow') return false;
+            const fromEl = elements.find(e => e.id === el.fromId);
+            const toEl = elements.find(e => e.id === el.toId);
+            if (!fromEl || !toEl) return false;
+            
+            const fromPoints = getConnectionPoints(fromEl);
+            const toPoints = getConnectionPoints(toEl);
+            const fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
+            const toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
+            
+            const A = x - fromPoint.x;
+            const B = y - fromPoint.y;
+            const C = toPoint.x - fromPoint.x;
+            const D = toPoint.y - fromPoint.y;
+            
+            const dot = A * C + B * D;
+            const lenSq = C * C + D * D;
+            let param = -1;
+            if (lenSq !== 0) param = dot / lenSq;
+            
+            let xx, yy;
+            
+            if (param < 0) {
+                xx = fromPoint.x;
+                yy = fromPoint.y;
+            } else if (param > 1) {
+                xx = toPoint.x;
+                yy = toPoint.y;
+            } else {
+                xx = fromPoint.x + param * C;
+                yy = fromPoint.y + param * D;
+            }
+            
+            const dx = x - xx;
+            const dy = y - yy;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            
+            return dist < 10;
+        });
+
+        if (clickedArrow) {
+            setContextMenu({ x: e.clientX, y: e.clientY, elementId: clickedArrow.id });
+        } else {
+            setContextMenu(null);
+        }
+    };
+
     const handleMouseMove = (e: React.MouseEvent) => {
         const { x, y } = getCanvasCoords(e);
+
+        if (isDrawing && resizeHandle && selectedElements.length === 1) {
+            const el = elements.find(e => e.id === selectedElements[0]);
+            if (el) {
+                let newX = el.x;
+                let newY = el.y;
+                let newW = el.w || 0;
+                let newH = el.h || 0;
+                let newRadius = el.radius || 0;
+
+                if (el.type === 'rect' || el.type === 'image') {
+                    if (resizeHandle.includes('e')) newW = x - el.x;
+                    if (resizeHandle.includes('s')) newH = y - el.y;
+                    if (resizeHandle.includes('w')) {
+                        const right = el.x + (el.w || 0);
+                        newX = x;
+                        newW = right - x;
+                    }
+                    if (resizeHandle.includes('n')) {
+                        const bottom = el.y + (el.h || 0);
+                        newY = y;
+                        newH = bottom - y;
+                    }
+                    
+                    if (newW < 10) newW = 10;
+                    if (newH < 10) newH = 10;
+                } else if (el.type === 'circle') {
+                    const centerX = el.x;
+                    const centerY = el.y;
+                    const dist = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2));
+                    newRadius = dist;
+                    if (newRadius < 5) newRadius = 5;
+                }
+
+                const newElements = elements.map(e => {
+                    if (e.id === el.id) {
+                        return { ...e, x: newX, y: newY, w: newW, h: newH, radius: newRadius };
+                    }
+                    return e;
+                });
+                setElements(newElements);
+                return;
+            }
+        }
+
+        if (!isDrawing && selectedElements.length === 1) {
+            const el = elements.find(e => e.id === selectedElements[0]);
+            if (el) {
+                const handles = getResizeHandles(el);
+                const hoveredHandle = handles.find(h => {
+                    return x >= h.x - 5 && x <= h.x + 5 && y >= h.y - 5 && y <= h.y + 5;
+                });
+                if (hoveredHandle && canvasRef.current) {
+                    canvasRef.current.style.cursor = getCursorForHandle(hoveredHandle.type);
+                } else if (canvasRef.current && tool === 'select') {
+                    canvasRef.current.style.cursor = 'default';
+                }
+            }
+        }
 
         if (tool === 'arrow') {
             const connection = getConnectionPointAtPosition(x, y);
@@ -460,7 +703,28 @@ const Board = () => {
     };
 
     const startDrawing = (e: React.MouseEvent) => {
+        if (contextMenu) {
+            setContextMenu(null);
+            return;
+        }
+
         const { x, y } = getCanvasCoords(e);
+
+        if (selectedElements.length === 1) {
+            const el = elements.find(e => e.id === selectedElements[0]);
+            if (el && (el.type === 'rect' || el.type === 'circle' || el.type === 'image')) {
+                const handles = getResizeHandles(el);
+                const clickedHandle = handles.find(h => {
+                    return x >= h.x - 5 && x <= h.x + 5 && y >= h.y - 5 && y <= h.y + 5;
+                });
+                if (clickedHandle) {
+                    setResizeHandle(clickedHandle.type);
+                    setIsDrawing(true);
+                    setStartPos({ x, y });
+                    return;
+                }
+            }
+        }
 
         if (tool === 'pan' || e.button === 1) {
             setIsPanning(true);
@@ -545,6 +809,14 @@ const Board = () => {
     };
 
     const stopDrawing = async () => {
+        if (resizeHandle) {
+            setResizeHandle(null);
+            setIsDrawing(false);
+            addToHistory(elements);
+            emitElements(elements);
+            return;
+        }
+
         if (isPanning) {
             setIsPanning(false);
             setStartPos(null);
@@ -691,9 +963,22 @@ const Board = () => {
         emitElements(newElements);
     };
 
+    const updateArrowStyle = (id: string, updates: Partial<Element>) => {
+        const newElements = elements.map(el => {
+            if (el.id === id) {
+                return { ...el, ...updates };
+            }
+            return el;
+        });
+        setElements(newElements);
+        addToHistory(newElements);
+        emitElements(newElements);
+        setContextMenu(null);
+    };
+
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.target instanceof HTMLInputElement) return;
+            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
             if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
                 e.preventDefault();
@@ -933,7 +1218,112 @@ const Board = () => {
                     onMouseMove={handleMouseMove}
                     onMouseUp={stopDrawing}
                     onMouseLeave={stopDrawing}
+                    onDoubleClick={handleDoubleClick}
+                    onContextMenu={handleContextMenu}
                 />
+
+                {editingElementId && (() => {
+                    const el = elements.find(e => e.id === editingElementId);
+                    if (!el) return null;
+                    
+                    const style: React.CSSProperties = {
+                        position: 'absolute',
+                        left: (el.type === 'circle' ? (el.x - (el.radius || 0)) : el.x) * zoom + panOffset.x,
+                        top: (el.type === 'circle' ? (el.y - (el.radius || 0)) : el.y) * zoom + panOffset.y,
+                        width: (el.type === 'circle' ? (el.radius || 0) * 2 : (el.w || 0)) * zoom,
+                        height: (el.type === 'circle' ? (el.radius || 0) * 2 : (el.h || 0)) * zoom,
+                        fontSize: (el.fontSize || 16) * zoom,
+                        textAlign: el.textAlign || 'center',
+                        background: 'transparent',
+                        border: 'none',
+                        outline: 'none',
+                        color: el.color || 'white',
+                        resize: 'none',
+                        overflow: 'hidden',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: 0,
+                        margin: 0,
+                    };
+
+                    return (
+                        <textarea
+                            autoFocus
+                            value={el.text || ''}
+                            onChange={(e) => {
+                                const newElements = elements.map(element => 
+                                    element.id === el.id ? { ...element, text: e.target.value } : element
+                                );
+                                setElements(newElements);
+                            }}
+                            onBlur={() => {
+                                setEditingElementId(null);
+                                addToHistory(elements);
+                                emitElements(elements);
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    setEditingElementId(null);
+                                    addToHistory(elements);
+                                    emitElements(elements);
+                                }
+                            }}
+                            style={style}
+                            className="z-30 bg-black/50 text-center flex items-center justify-center"
+                        />
+                    );
+                })()}
+
+                {contextMenu && (
+                    <div 
+                        className="absolute bg-card border border-border rounded shadow-lg p-2 z-50 flex flex-col gap-2"
+                        style={{ left: contextMenu.x, top: contextMenu.y }}
+                    >
+                        <div className="text-xs font-bold mb-1">Arrow Style</div>
+                        <div className="flex gap-1">
+                            <button 
+                                onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'straight' })}
+                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
+                            >Straight</button>
+                            <button 
+                                onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'elbow' })}
+                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
+                            >Elbow</button>
+                            <button 
+                                onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'curved' })}
+                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
+                            >Curved</button>
+                        </div>
+                        <div className="w-full h-px bg-border" />
+                        <div className="flex gap-1">
+                            <button 
+                                onClick={() => updateArrowStyle(contextMenu.elementId, { lineStyle: 'solid' })}
+                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
+                            >Solid</button>
+                            <button 
+                                onClick={() => updateArrowStyle(contextMenu.elementId, { lineStyle: 'dashed' })}
+                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
+                            >Dashed</button>
+                            <button 
+                                onClick={() => updateArrowStyle(contextMenu.elementId, { lineStyle: 'dotted' })}
+                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
+                            >Dotted</button>
+                        </div>
+                         <div className="w-full h-px bg-border" />
+                         <button 
+                            onClick={() => {
+                                const newElements = elements.filter(e => e.id !== contextMenu.elementId);
+                                setElements(newElements);
+                                addToHistory(newElements);
+                                emitElements(newElements);
+                                setContextMenu(null);
+                            }}
+                            className="text-red-500 hover:bg-secondary p-1 rounded text-xs text-left"
+                        >Delete Arrow</button>
+                    </div>
+                )}
 
                 {showPropertiesPanel && selectedElements.length > 0 && (
                     <div className="absolute top-20 right-4 bg-card p-4 rounded-lg border border-border shadow-lg z-20 w-64">
