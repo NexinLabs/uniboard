@@ -1874,7 +1874,7 @@ const Board = () => {
                             <button className="w-full flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
                                 <BringToFront size={14} /> <span>Change Order</span> <ArrowRight size={12} className="ml-auto" />
                             </button>
-                            <div className="absolute left-full top-0 ml-1 bg-card border border-border rounded shadow-lg p-1 flex flex-col min-w-[150px] hidden group-hover/order:flex">
+                            <div className="absolute left-full top-0 ml-1 bg-card border border-border rounded shadow-lg p-1 flex-col min-w-[150px] hidden group-hover/order:flex">
                                 <button onClick={() => {
                                     // Bring forward
                                     const idx = elements.findIndex(e => e.id === contextMenu.elementId);
@@ -1991,7 +1991,7 @@ const Board = () => {
                                         style={{ backgroundColor: elements.find(el => el.id === selectedElements[0])?.backgroundColor || 'transparent' }}
                                     />
                                 </button>
-                                <div className="absolute bottom-full left-0 mb-0 hidden group-hover:block bg-card p-2 rounded border border-border shadow-lg flex flex-col gap-2">
+                                <div className="absolute bottom-full left-0 mb-0  group-hover:block bg-card p-2 rounded border border-border shadow-lg flex flex-col gap-2">
                                     <div className="flex items-center gap-2">
                                         <span className="text-xs">Fill:</span>
                                         <input
