@@ -5,10 +5,12 @@ import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
 import {
     Square, Circle, Type, Image as ImageIcon, Trash2, MousePointer,
-    ArrowRight, Copy, Clipboard, Palette, Undo, Redo, Hand
+    ArrowRight, Copy, Clipboard, Palette, Undo, Redo, Hand,
+    Minus, CornerDownRight, Activity, ArrowLeft, ArrowLeftRight,
+    Plus, Sparkles, MessageSquare, Frame, Search
 } from 'lucide-react';
 
-type Tool = 'select' | 'rect' | 'circle' | 'text' | 'image' | 'arrow' | 'pan';
+type Tool = 'select' | 'rect' | 'circle' | 'text' | 'image' | 'arrow' | 'line' | 'draw' | 'frame' | 'comment' | 'pan';
 
 interface ConnectionPoint {
     x: number;
@@ -31,6 +33,8 @@ interface Element {
     toId?: string;
     fromPoint?: ConnectionPoint;
     toPoint?: ConnectionPoint;
+    startPoint?: { x: number, y: number };
+    endPoint?: { x: number, y: number };
     // New properties
     fontSize?: number;
     textAlign?: 'center' | 'left' | 'right';
@@ -63,8 +67,9 @@ const Board = () => {
     const [startPos, setStartPos] = useState<{ x: number, y: number } | null>(null);
     const [currentPos, setCurrentPos] = useState<{ x: number, y: number } | null>(null);
     const [dragOffset, setDragOffset] = useState<{ x: number, y: number } | null>(null);
-    const [arrowStart, setArrowStart] = useState<{ elementId: string, point: ConnectionPoint } | null>(null);
+    const [arrowStart, setArrowStart] = useState<{ x: number, y: number, elementId?: string, point?: ConnectionPoint } | null>(null);
     const [hoveredConnectionPoint, setHoveredConnectionPoint] = useState<{ elementId: string, point: ConnectionPoint } | null>(null);
+    const [selectionBox, setSelectionBox] = useState<{ start: { x: number, y: number }, current: { x: number, y: number } } | null>(null);
     
     // New state for advanced features
     const [editingElementId, setEditingElementId] = useState<string | null>(null);
@@ -253,12 +258,21 @@ const Board = () => {
         elements.filter(el => el.type === 'arrow').forEach(el => {
             const fromEl = elements.find(e => e.id === el.fromId);
             const toEl = elements.find(e => e.id === el.toId);
-            if (!fromEl || !toEl) return;
+            
+            let fromPoint = el.startPoint;
+            let toPoint = el.endPoint;
 
-            const fromPoints = getConnectionPoints(fromEl);
-            const toPoints = getConnectionPoints(toEl);
-            const fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
-            const toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
+            if (fromEl && el.fromPoint) {
+                const fromPoints = getConnectionPoints(fromEl);
+                fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
+            }
+            
+            if (toEl && el.toPoint) {
+                const toPoints = getConnectionPoints(toEl);
+                toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
+            }
+
+            if (!fromPoint || !toPoint) return;
 
             ctx.strokeStyle = el.color || 'white';
             ctx.lineWidth = (el.lineWidth || 2) + (selectedElements.includes(el.id) ? 1 : 0);
@@ -299,6 +313,39 @@ const Board = () => {
             ctx.setLineDash([]);
 
             const headLength = 15;
+            
+            // Draw start arrow head
+            if (el.arrowHead === 'start' || el.arrowHead === 'both') {
+                let startAngle;
+                if (el.arrowType === 'elbow') {
+                    if (Math.abs(fromPoint.y - toPoint.y) > 0) {
+                        startAngle = toPoint.y > fromPoint.y ? -Math.PI / 2 : Math.PI / 2;
+                    } else {
+                        startAngle = toPoint.x > fromPoint.x ? Math.PI : 0;
+                    }
+                } else if (el.arrowType === 'curved') {
+                    const dx = toPoint.x - fromPoint.x;
+                    const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
+                    startAngle = Math.atan2(controlPoint1.y - fromPoint.y, controlPoint1.x - fromPoint.x) + Math.PI;
+                } else {
+                    startAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x) + Math.PI;
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(fromPoint.x, fromPoint.y);
+                ctx.lineTo(
+                    fromPoint.x - headLength * Math.cos(startAngle - Math.PI / 6),
+                    fromPoint.y - headLength * Math.sin(startAngle - Math.PI / 6)
+                );
+                ctx.moveTo(fromPoint.x, fromPoint.y);
+                ctx.lineTo(
+                    fromPoint.x - headLength * Math.cos(startAngle + Math.PI / 6),
+                    fromPoint.y - headLength * Math.sin(startAngle + Math.PI / 6)
+                );
+                ctx.stroke();
+            }
+
+            // Draw end arrow head
             if (el.arrowHead === 'end' || el.arrowHead === 'both' || !el.arrowHead) {
                 ctx.beginPath();
                 ctx.moveTo(toPoint.x, toPoint.y);
@@ -426,21 +473,30 @@ const Board = () => {
             }
         });
 
-        if (tool === 'arrow' && arrowStart && currentPos) {
-            const fromEl = elements.find(e => e.id === arrowStart.elementId);
-            if (fromEl) {
-                ctx.strokeStyle = 'rgba(96, 165, 250, 0.7)';
-                ctx.lineWidth = 2;
-                ctx.setLineDash([5, 5]);
-                ctx.beginPath();
-                ctx.moveTo(arrowStart.point.x, arrowStart.point.y);
-                ctx.lineTo(currentPos.x, currentPos.y);
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
+        if ((tool === 'arrow' || tool === 'line') && arrowStart && currentPos) {
+            ctx.strokeStyle = 'rgba(96, 165, 250, 0.7)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(arrowStart.x, arrowStart.y);
+            ctx.lineTo(currentPos.x, currentPos.y);
+            ctx.stroke();
+            ctx.setLineDash([]);
         }
 
-        if (isDrawing && startPos && currentPos && tool !== 'select' && tool !== 'pan' && tool !== 'arrow') {
+        if (selectionBox) {
+            ctx.strokeStyle = '#3b82f6';
+            ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
+            ctx.lineWidth = 1;
+            const x = Math.min(selectionBox.start.x, selectionBox.current.x);
+            const y = Math.min(selectionBox.start.y, selectionBox.current.y);
+            const w = Math.abs(selectionBox.current.x - selectionBox.start.x);
+            const h = Math.abs(selectionBox.current.y - selectionBox.start.y);
+            ctx.fillRect(x, y, w, h);
+            ctx.strokeRect(x, y, w, h);
+        }
+
+        if (isDrawing && startPos && currentPos && tool !== 'select' && tool !== 'pan' && tool !== 'arrow' && tool !== 'line') {
             ctx.strokeStyle = currentColor;
             ctx.globalAlpha = 0.5;
             ctx.lineWidth = 2;
@@ -513,6 +569,60 @@ const Board = () => {
             } else if (el.type === 'image') {
                 if (x >= el.x && x <= el.x + (el.w || 200) && y >= el.y && y <= el.y + (el.h || 200)) {
                     return el;
+                }
+            } else if (el.type === 'arrow') {
+                // Arrow hit detection
+                let fromPoint = el.startPoint;
+                let toPoint = el.endPoint;
+
+                if (el.fromId && el.fromPoint) {
+                    const fromEl = elements.find(e => e.id === el.fromId);
+                    if (fromEl) {
+                        const fromPoints = getConnectionPoints(fromEl);
+                        fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
+                    }
+                }
+                
+                if (el.toId && el.toPoint) {
+                    const toEl = elements.find(e => e.id === el.toId);
+                    if (toEl) {
+                        const toPoints = getConnectionPoints(toEl);
+                        toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
+                    }
+                }
+
+                if (fromPoint && toPoint) {
+                    // Simple distance to segment check for straight lines
+                    // For curves/elbows, this is an approximation or needs more complex logic
+                    // Using the same logic as context menu for now
+                    const A = x - fromPoint.x;
+                    const B = y - fromPoint.y;
+                    const C = toPoint.x - fromPoint.x;
+                    const D = toPoint.y - fromPoint.y;
+                    
+                    const dot = A * C + B * D;
+                    const lenSq = C * C + D * D;
+                    let param = -1;
+                    if (lenSq !== 0) param = dot / lenSq;
+                    
+                    let xx, yy;
+                    
+                    if (param < 0) {
+                        xx = fromPoint.x;
+                        yy = fromPoint.y;
+                    } else if (param > 1) {
+                        xx = toPoint.x;
+                        yy = toPoint.y;
+                    } else {
+                        xx = fromPoint.x + param * C;
+                        yy = fromPoint.y + param * D;
+                    }
+                    
+                    const dx = x - xx;
+                    const dy = y - yy;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (dist < 10) return el;
                 }
             }
         }
@@ -656,7 +766,7 @@ const Board = () => {
             }
         }
 
-        if (tool === 'arrow') {
+        if (tool === 'arrow' || tool === 'line') {
             const connection = getConnectionPointAtPosition(x, y);
             if (connection) {
                 setHoveredConnectionPoint({ elementId: connection.element.id, point: connection.point });
@@ -674,9 +784,14 @@ const Board = () => {
         }
 
         if (!isDrawing) {
-            if (tool === 'arrow' && arrowStart) {
+            if ((tool === 'arrow' || tool === 'line') && arrowStart) {
                 setCurrentPos({ x, y });
             }
+            return;
+        }
+
+        if (selectionBox) {
+            setSelectionBox({ ...selectionBox, current: { x, y } });
             return;
         }
 
@@ -732,23 +847,36 @@ const Board = () => {
             return;
         }
 
-        if (tool === 'arrow') {
+        if (tool === 'arrow' || tool === 'line') {
             const connection = getConnectionPointAtPosition(x, y);
-            if (connection && !arrowStart) {
-                setArrowStart({ elementId: connection.element.id, point: connection.point });
+            const start = connection ? { x: connection.point.x, y: connection.point.y } : { x, y };
+            const startId = connection ? connection.element.id : undefined;
+            const startPoint = connection ? connection.point : undefined;
+
+            if (!arrowStart) {
+                setArrowStart({ x: start.x, y: start.y, elementId: startId, point: startPoint });
                 setCurrentPos({ x, y });
-                setTool('arrow');
-            } else if (connection && arrowStart && connection.element.id !== arrowStart.elementId) {
+                // setTool(tool); // Already set
+            } else {
+                // Finish arrow
+                const end = connection ? { x: connection.point.x, y: connection.point.y } : { x, y };
+                const endId = connection ? connection.element.id : undefined;
+                const endPoint = connection ? connection.point : undefined;
+
                 const newElement: Element = {
                     id: Date.now().toString(),
                     type: 'arrow',
                     x: 0,
                     y: 0,
                     fromId: arrowStart.elementId,
-                    toId: connection.element.id,
+                    toId: endId,
                     fromPoint: arrowStart.point,
-                    toPoint: connection.point,
-                    color: currentColor
+                    toPoint: endPoint,
+                    startPoint: !arrowStart.elementId ? { x: arrowStart.x, y: arrowStart.y } : undefined,
+                    endPoint: !endId ? { x: end.x, y: end.y } : undefined,
+                    color: currentColor,
+                    arrowHead: tool === 'line' ? 'none' : 'end',
+                    arrowType: tool === 'line' ? 'straight' : 'straight'
                 };
                 const newElements = [...elements, newElement];
                 setElements(newElements);
@@ -764,7 +892,7 @@ const Board = () => {
         if (tool === 'select') {
             const connection = getConnectionPointAtPosition(x, y);
             if (connection) {
-                setArrowStart({ elementId: connection.element.id, point: connection.point });
+                setArrowStart({ x: connection.point.x, y: connection.point.y, elementId: connection.element.id, point: connection.point });
                 setCurrentPos({ x, y });
                 setTool('arrow');
                 return;
@@ -781,6 +909,8 @@ const Board = () => {
                 setIsDrawing(true);
                 setShowPropertiesPanel(true);
             } else {
+                // Start marquee selection
+                setSelectionBox({ start: { x, y }, current: { x, y } });
                 setSelectedElements([]);
                 setShowPropertiesPanel(false);
             }
@@ -820,6 +950,32 @@ const Board = () => {
         if (isPanning) {
             setIsPanning(false);
             setStartPos(null);
+            return;
+        }
+
+        if (selectionBox) {
+            const x = Math.min(selectionBox.start.x, selectionBox.current.x);
+            const y = Math.min(selectionBox.start.y, selectionBox.current.y);
+            const w = Math.abs(selectionBox.current.x - selectionBox.start.x);
+            const h = Math.abs(selectionBox.current.y - selectionBox.start.y);
+
+            const selected = elements.filter(el => {
+                if (el.type === 'rect' || el.type === 'image') {
+                    return el.x >= x && el.x + (el.w || 0) <= x + w &&
+                           el.y >= y && el.y + (el.h || 0) <= y + h;
+                } else if (el.type === 'circle') {
+                    const r = el.radius || 0;
+                    return el.x - r >= x && el.x + r <= x + w &&
+                           el.y - r >= y && el.y + r <= y + h;
+                } else if (el.type === 'text') {
+                    // Approximate text bounds
+                    return el.x >= x && el.x <= x + w && el.y >= y && el.y <= y + h;
+                }
+                return false;
+            }).map(el => el.id);
+
+            setSelectedElements(selected);
+            setSelectionBox(null);
             return;
         }
 
@@ -950,17 +1106,21 @@ const Board = () => {
         input.click();
     };
 
-    const updateSelectedColor = (color: string) => {
+    const updateSelectedElements = (updates: Partial<Element>) => {
         if (selectedElements.length === 0) return;
         const newElements = elements.map(el => {
             if (selectedElements.includes(el.id)) {
-                return { ...el, color };
+                return { ...el, ...updates };
             }
             return el;
         });
         setElements(newElements);
         addToHistory(newElements);
         emitElements(newElements);
+    };
+
+    const updateSelectedColor = (color: string) => {
+        updateSelectedElements({ color });
     };
 
     const updateArrowStyle = (id: string, updates: Partial<Element>) => {
@@ -997,16 +1157,19 @@ const Board = () => {
             }
 
             switch (e.key.toLowerCase()) {
+                case 'v':
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        paste();
+                    } else {
+                        setTool('select');
+                    }
+                    break;
                 case 'r':
                     setTool('rect');
                     break;
-                case 'c':
-                    if (e.ctrlKey || e.metaKey) {
-                        e.preventDefault();
-                        copySelected();
-                    } else {
-                        setTool('circle');
-                    }
+                case 'o':
+                    setTool('circle');
                     break;
                 case 't':
                     setTool('text');
@@ -1019,11 +1182,25 @@ const Board = () => {
                         setTool('arrow');
                     }
                     break;
-                case 'v':
+                case 'l':
+                    setTool('line');
+                    break;
+                case 'd':
+                    setTool('draw');
+                    break;
+                case 'f':
+                    setTool('frame');
+                    break;
+                case 'c':
                     if (e.ctrlKey || e.metaKey) {
                         e.preventDefault();
-                        paste();
+                        copySelected();
+                    } else {
+                        setTool('comment');
                     }
+                    break;
+                case 'i':
+                    handleImageUpload();
                     break;
                 case 'x':
                     if (e.ctrlKey || e.metaKey) {
@@ -1064,144 +1241,124 @@ const Board = () => {
 
     return (
         <div className="h-[calc(100vh-80px)] bg-gray-950 rounded-lg border border-border relative overflow-hidden flex">
-            <div className="w-16 bg-card border-r border-border flex flex-col items-center py-4 gap-2">
-                <button
-                    onClick={() => setTool('select')}
-                    className={`p-3 rounded ${tool === 'select' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary'}`}
-                    title="Select (V)"
-                >
-                    <MousePointer size={20} />
-                </button>
-                <button
-                    onClick={() => setTool('pan')}
-                    className={`p-3 rounded ${tool === 'pan' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary'}`}
-                    title="Pan (Space)"
-                >
-                    <Hand size={20} />
-                </button>
-
-                <div className="w-10 h-px bg-border my-1" />
-
-                <button
-                    onClick={() => setTool('rect')}
-                    className={`p-3 rounded ${tool === 'rect' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary'}`}
-                    title="Rectangle (R)"
-                >
-                    <Square size={20} />
-                </button>
-                <button
-                    onClick={() => setTool('circle')}
-                    className={`p-3 rounded ${tool === 'circle' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary'}`}
-                    title="Circle (C)"
-                >
-                    <Circle size={20} />
-                </button>
-                <button
-                    onClick={() => setTool('arrow')}
-                    className={`p-3 rounded ${tool === 'arrow' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary'}`}
-                    title="Arrow (A)"
-                >
-                    <ArrowRight size={20} />
-                </button>
-                <button
-                    onClick={() => setTool('text')}
-                    className={`p-3 rounded ${tool === 'text' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary'}`}
-                    title="Text (T)"
-                >
-                    <Type size={20} />
-                </button>
-                <button
-                    onClick={handleImageUpload}
-                    className="p-3 rounded hover:bg-secondary"
-                    title="Upload Image"
-                >
-                    <ImageIcon size={20} />
-                </button>
-
-                <div className="w-10 h-px bg-border my-1" />
-
-                <div className="relative">
-                    <button
-                        onClick={() => setShowColorPicker(!showColorPicker)}
-                        className="p-3 rounded hover:bg-secondary"
-                        title="Color"
-                    >
-                        <Palette size={20} />
+            <div className="absolute top-4 left-4 flex flex-col gap-2 z-10">
+                {/* Top Group */}
+                <div className="bg-card border border-border rounded-lg p-1 flex flex-col gap-1 shadow-lg">
+                    <button className="p-2 rounded hover:bg-secondary text-muted-foreground hover:text-foreground relative group">
+                        <Plus size={20} />
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Insert (I)</span>
                     </button>
-                    <div
-                        className="absolute bottom-0 left-2 w-3 h-3 rounded-full border border-border"
-                        style={{ backgroundColor: currentColor }}
-                    />
-                    {showColorPicker && (
-                        <div className="absolute left-16 top-0 bg-card p-2 rounded border border-border shadow-lg z-50">
-                            <input
-                                type="color"
-                                value={currentColor}
-                                onChange={(e) => setCurrentColor(e.target.value)}
-                                className="w-32 h-8"
-                            />
-                        </div>
-                    )}
+                    <button className="p-2 rounded hover:bg-secondary text-muted-foreground hover:text-foreground relative group">
+                        <Sparkles size={20} />
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">AI (Ctrl+J)</span>
+                    </button>
                 </div>
 
-                <div className="w-10 h-px bg-border my-1" />
+                {/* Main Tools Group */}
+                <div className="bg-card border border-border rounded-lg p-1 flex flex-col gap-1 shadow-lg">
+                    <button
+                        onClick={() => setTool('select')}
+                        className={`p-2 rounded relative group ${tool === 'select' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                    >
+                        <MousePointer size={20} />
+                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">V</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Select</span>
+                    </button>
+                    
+                    <button
+                        onClick={() => setTool('rect')}
+                        className={`p-2 rounded relative group ${tool === 'rect' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                    >
+                        <Square size={20} />
+                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">R</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Rectangle</span>
+                    </button>
 
-                <button
-                    onClick={undo}
-                    disabled={historyIndex === 0}
-                    className="p-3 rounded hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed"
-                    title="Undo (Ctrl+Z)"
-                >
-                    <Undo size={20} />
-                </button>
-                <button
-                    onClick={redo}
-                    disabled={historyIndex === history.length - 1}
-                    className="p-3 rounded hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed"
-                    title="Redo (Ctrl+Shift+Z)"
-                >
-                    <Redo size={20} />
-                </button>
+                    <button
+                        onClick={() => setTool('circle')}
+                        className={`p-2 rounded relative group ${tool === 'circle' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                    >
+                        <Circle size={20} />
+                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">O</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Circle</span>
+                    </button>
 
-                <div className="w-10 h-px bg-border my-1" />
+                    <button
+                        onClick={() => setTool('arrow')}
+                        className={`p-2 rounded relative group ${tool === 'arrow' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                    >
+                        <ArrowRight size={20} />
+                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">A</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Arrow</span>
+                    </button>
 
-                <button
-                    onClick={copySelected}
-                    disabled={selectedElements.length === 0}
-                    className="p-3 rounded hover:bg-secondary disabled:opacity-30"
-                    title="Copy (Ctrl+C)"
-                >
-                    <Copy size={20} />
-                </button>
-                <button
-                    onClick={paste}
-                    disabled={clipboard.length === 0}
-                    className="p-3 rounded hover:bg-secondary disabled:opacity-30"
-                    title="Paste (Ctrl+V)"
-                >
-                    <Clipboard size={20} />
-                </button>
-                <button
-                    onClick={deleteSelected}
-                    disabled={selectedElements.length === 0}
-                    className="p-3 rounded hover:bg-destructive disabled:opacity-30"
-                    title="Delete (Del)"
-                >
-                    <Trash2 size={20} />
-                </button>
+                    <button
+                        onClick={() => setTool('line')}
+                        className={`p-2 rounded relative group ${tool === 'line' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                    >
+                        <Minus size={20} className="rotate-45" />
+                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">L</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Line</span>
+                    </button>
+
+                    <button
+                        onClick={() => setTool('draw')}
+                        className={`p-2 rounded relative group ${tool === 'draw' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                    >
+                        <Activity size={20} />
+                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">D</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Draw</span>
+                    </button>
+
+                    <button
+                        onClick={() => setTool('text')}
+                        className={`p-2 rounded relative group ${tool === 'text' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                    >
+                        <Type size={20} />
+                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">T</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Text</span>
+                    </button>
+
+                    <button
+                        onClick={handleImageUpload}
+                        className={`p-2 rounded relative group hover:bg-secondary text-muted-foreground hover:text-foreground`}
+                    >
+                        <Search size={20} />
+                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">I</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Image</span>
+                    </button>
+                </div>
+
+                {/* Bottom Group */}
+                <div className="bg-card border border-border rounded-lg p-1 flex flex-col gap-1 shadow-lg">
+                    <button 
+                        onClick={() => setTool('frame')}
+                        className={`p-2 rounded relative group ${tool === 'frame' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                    >
+                        <Frame size={20} />
+                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">F</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Frame</span>
+                    </button>
+                    <button 
+                        onClick={() => setTool('comment')}
+                        className={`p-2 rounded relative group ${tool === 'comment' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                    >
+                        <MessageSquare size={20} />
+                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">C</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Comment</span>
+                    </button>
+                </div>
             </div>
 
             <div className="flex-1 relative">
-                <div className="absolute top-4 left-4 bg-card/90 backdrop-blur-sm p-2 px-3 rounded border border-border z-10">
-                    <div className="text-xs text-muted-foreground">
-                        {tool === 'select' && 'Click to select, drag to move'}
-                        {tool === 'arrow' && (arrowStart ? 'Click a connection point to finish arrow' : 'Click a connection point to start arrow')}
-                        {tool === 'pan' && 'Drag to pan canvas'}
-                        {tool === 'rect' && 'Drag to draw rectangle'}
-                        {tool === 'circle' && 'Drag to draw circle'}
-                        {tool === 'text' && 'Click to add text'}
-                        {selectedElements.length > 0 && ` • ${selectedElements.length} selected`}
-                    </div>
+                <div className="absolute top-4 right-4 flex gap-2 z-10">
+                     <button
+                        onClick={() => setTool('pan')}
+                        className={`p-2 rounded border border-border shadow-sm ${tool === 'pan' ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-secondary text-muted-foreground'}`}
+                        title="Pan (Space)"
+                    >
+                        <Hand size={20} />
+                    </button>
                 </div>
 
                 <canvas
@@ -1325,30 +1482,136 @@ const Board = () => {
                     </div>
                 )}
 
-                {showPropertiesPanel && selectedElements.length > 0 && (
-                    <div className="absolute top-20 right-4 bg-card p-4 rounded-lg border border-border shadow-lg z-20 w-64">
-                        <h3 className="text-sm font-semibold mb-3">Properties</h3>
-                        <div className="space-y-3">
-                            <div>
-                                <label className="text-xs text-muted-foreground mb-1 block">Border Color</label>
-                                <div className="flex gap-2 items-center">
-                                    <input
-                                        type="color"
-                                        value={elements.find(el => el.id === selectedElements[0])?.color || '#ffffff'}
-                                        onChange={(e) => updateSelectedColor(e.target.value)}
-                                        className="w-full h-8 rounded cursor-pointer"
-                                    />
-                                    <div
-                                        className="w-8 h-8 rounded border border-border"
-                                        style={{ backgroundColor: elements.find(el => el.id === selectedElements[0])?.color || '#ffffff' }}
-                                    />
-                                </div>
-                            </div>
-                            <div className="text-xs text-muted-foreground pt-2 border-t border-border">
-                                {selectedElements.length} element{selectedElements.length > 1 ? 's' : ''} selected
+                {selectedElements.length > 0 && (
+                    <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-card border border-border rounded-lg shadow-lg p-2 flex gap-2 items-center z-50">
+                        {/* Color Picker */}
+                        <div className="relative group">
+                            <button
+                                className="p-2 hover:bg-secondary rounded border border-border"
+                                title="Color"
+                            >
+                                <div 
+                                    className="w-4 h-4 rounded-full border border-gray-500"
+                                    style={{ backgroundColor: elements.find(el => el.id === selectedElements[0])?.color || '#ffffff' }}
+                                />
+                            </button>
+                            <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-card p-2 rounded border border-border shadow-lg">
+                                <input
+                                    type="color"
+                                    value={elements.find(el => el.id === selectedElements[0])?.color || '#ffffff'}
+                                    onChange={(e) => updateSelectedColor(e.target.value)}
+                                    className="w-32 h-8 cursor-pointer"
+                                />
                             </div>
                         </div>
+
+                        <div className="w-px h-6 bg-border mx-1" />
+
+                        {/* Arrow Specific Controls */}
+                        {elements.find(el => el.id === selectedElements[0])?.type === 'arrow' && (
+                            <>
+                                {/* Arrow Type */}
+                                <div className="flex bg-secondary/50 rounded p-1 gap-1">
+                                    <button
+                                        onClick={() => updateSelectedElements({ arrowType: 'straight' })}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.arrowType === 'straight' ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="Straight"
+                                    >
+                                        <Minus size={16} />
+                                    </button>
+                                    <button
+                                        onClick={() => updateSelectedElements({ arrowType: 'elbow' })}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.arrowType === 'elbow' ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="Elbow"
+                                    >
+                                        <CornerDownRight size={16} />
+                                    </button>
+                                    <button
+                                        onClick={() => updateSelectedElements({ arrowType: 'curved' })}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.arrowType === 'curved' ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="Curved"
+                                    >
+                                        <Activity size={16} />
+                                    </button>
+                                </div>
+
+                                <div className="w-px h-6 bg-border mx-1" />
+
+                                {/* Line Style */}
+                                <div className="flex bg-secondary/50 rounded p-1 gap-1">
+                                    <button
+                                        onClick={() => updateSelectedElements({ lineStyle: 'solid' })}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.lineStyle === 'solid' ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="Solid"
+                                    >
+                                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><line x1="2" y1="8" x2="14" y2="8" /></svg>
+                                    </button>
+                                    <button
+                                        onClick={() => updateSelectedElements({ lineStyle: 'dashed' })}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.lineStyle === 'dashed' ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="Dashed"
+                                    >
+                                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><line x1="2" y1="8" x2="6" y2="8" /><line x1="10" y1="8" x2="14" y2="8" /></svg>
+                                    </button>
+                                    <button
+                                        onClick={() => updateSelectedElements({ lineStyle: 'dotted' })}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.lineStyle === 'dotted' ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="Dotted"
+                                    >
+                                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="3" cy="8" r="1" /><circle cx="8" cy="8" r="1" /><circle cx="13" cy="8" r="1" /></svg>
+                                    </button>
+                                </div>
+
+                                <div className="w-px h-6 bg-border mx-1" />
+
+                                {/* Arrow Heads */}
+                                <div className="flex bg-secondary/50 rounded p-1 gap-1">
+                                    <button
+                                        onClick={() => updateSelectedElements({ arrowHead: 'none' })}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.arrowHead === 'none' ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="None"
+                                    >
+                                        <Minus size={16} />
+                                    </button>
+                                    <button
+                                        onClick={() => updateSelectedElements({ arrowHead: 'start' })}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.arrowHead === 'start' ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="Start"
+                                    >
+                                        <ArrowLeft size={16} />
+                                    </button>
+                                    <button
+                                        onClick={() => updateSelectedElements({ arrowHead: 'end' })}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.arrowHead === 'end' || !elements.find(el => el.id === selectedElements[0])?.arrowHead ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="End"
+                                    >
+                                        <ArrowRight size={16} />
+                                    </button>
+                                    <button
+                                        onClick={() => updateSelectedElements({ arrowHead: 'both' })}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.arrowHead === 'both' ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="Both"
+                                    >
+                                        <ArrowLeftRight size={16} />
+                                    </button>
+                                </div>
+                            </>
+                        )}
+
+                        <div className="w-px h-6 bg-border mx-1" />
+
+                        <button
+                            onClick={deleteSelected}
+                            className="p-2 hover:bg-destructive hover:text-destructive-foreground rounded text-destructive"
+                            title="Delete"
+                        >
+                            <Trash2 size={18} />
+                        </button>
                     </div>
+                )}
+
+                {showPropertiesPanel && selectedElements.length > 0 && (
+                    <div className="hidden"></div>
                 )}
             </div>
         </div>
