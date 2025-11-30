@@ -7,11 +7,12 @@ import {
     Square, Circle, Type,  Trash2, MousePointer,
     ArrowRight, Hand,
     Minus, CornerDownRight, Activity, ArrowLeft, ArrowLeftRight,
-    Plus, Sparkles, MessageSquare, Frame, Search, AlignLeft, AlignCenter, AlignRight,
-    Bold, Italic, Underline
+    Plus, Sparkles, Frame, Search, AlignLeft, AlignCenter, AlignRight,
+    Layers, Eye, EyeOff, Copy, Scissors, Clipboard, MoreHorizontal,
+    BringToFront, SendToBack, Group, Download
 } from 'lucide-react';
 
-type Tool = 'select' | 'rect' | 'circle' | 'text' | 'image' | 'arrow' | 'line' | 'draw' | 'frame' | 'comment' | 'pan';
+type Tool = 'select' | 'rect' | 'circle' | 'text' | 'image' | 'arrow' | 'line' | 'draw' | 'frame' | 'pan';
 
 interface ConnectionPoint {
     x: number;
@@ -50,7 +51,49 @@ interface Element {
     textColor?: string;
     textWrap?: boolean;
     controlPoint?: { x: number, y: number };
+    isHidden?: boolean;
+    isLocked?: boolean;
 }
+
+const distanceToSegment = (p: {x: number, y: number}, a: {x: number, y: number}, b: {x: number, y: number}) => {
+    const A = p.x - a.x;
+    const B = p.y - a.y;
+    const C = b.x - a.x;
+    const D = b.y - a.y;
+
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    let param = -1;
+    if (lenSq !== 0) param = dot / lenSq;
+
+    let xx, yy;
+
+    if (param < 0) {
+        xx = a.x;
+        yy = a.y;
+    } else if (param > 1) {
+        xx = b.x;
+        yy = b.y;
+    } else {
+        xx = a.x + param * C;
+        yy = a.y + param * D;
+    }
+
+    const dx = p.x - xx;
+    const dy = p.y - yy;
+    return Math.sqrt(dx * dx + dy * dy);
+};
+
+const distanceToBezier = (p: {x: number, y: number}, p0: {x: number, y: number}, p1: {x: number, y: number}, p2: {x: number, y: number}, p3: {x: number, y: number}) => {
+    let minDst = Infinity;
+    for (let t = 0; t <= 1; t += 0.05) {
+        const x = Math.pow(1-t, 3)*p0.x + 3*Math.pow(1-t, 2)*t*p1.x + 3*(1-t)*t*t*p2.x + t*t*t*p3.x;
+        const y = Math.pow(1-t, 3)*p0.y + 3*Math.pow(1-t, 2)*t*p1.y + 3*(1-t)*t*t*p2.y + t*t*t*p3.y;
+        const d = Math.sqrt(Math.pow(p.x - x, 2) + Math.pow(p.y - y, 2));
+        if (d < minDst) minDst = d;
+    }
+    return minDst;
+};
 
 const getWrappedLines = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
     const words = text.split(' ');
@@ -103,6 +146,7 @@ const Board = () => {
     const [resizeHandle, setResizeHandle] = useState<ResizeHandle | null>(null);
     const [arrowHandle, setArrowHandle] = useState<{ type: 'start' | 'end' | 'control', x: number, y: number } | null>(null);
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, elementId: string } | null>(null);
+    const [showLayers, setShowLayers] = useState(false);
 
     const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState(false);
@@ -426,7 +470,11 @@ const Board = () => {
         ctx.translate(panOffset.x, panOffset.y);
         ctx.scale(zoom, zoom);
 
-        elements.filter(el => el.type === 'arrow').forEach(el => {
+        elements.forEach(el => {
+            if (el.isHidden) return;
+            const isSelected = selectedElements.includes(el.id);
+
+            if (el.type === 'arrow') {
             const fromEl = elements.find(e => e.id === el.fromId);
             const toEl = elements.find(e => e.id === el.toId);
             
@@ -468,8 +516,10 @@ const Board = () => {
                 const dx = toPoint.x - fromPoint.x;
                 const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
                 const controlPoint2 = { x: toPoint.x - dx / 2, y: toPoint.y };
+                ctx.beginPath();
                 ctx.moveTo(fromPoint.x, fromPoint.y);
                 ctx.bezierCurveTo(controlPoint1.x, controlPoint1.y, controlPoint2.x, controlPoint2.y, toPoint.x, toPoint.y);
+                ctx.stroke();
                 // Approximate end angle for bezier
                 endAngle = Math.atan2(toPoint.y - controlPoint2.y, toPoint.x - controlPoint2.x);
             } else {
@@ -532,12 +582,7 @@ const Board = () => {
                 );
                 ctx.stroke();
             }
-        });
-
-        elements.filter(el => el.type !== 'arrow').forEach(el => {
-            const isSelected = selectedElements.includes(el.id);
-            
-            if (el.type === 'rect') {
+            } else if (el.type === 'rect') {
                 ctx.globalAlpha = el.opacity || 1;
                 if (el.backgroundColor) {
                     ctx.fillStyle = el.backgroundColor;
@@ -815,6 +860,8 @@ const Board = () => {
     const getElementAtPosition = (x: number, y: number): Element | null => {
         for (let i = elements.length - 1; i >= 0; i--) {
             const el = elements[i];
+            if (el.isHidden) continue;
+
             if (el.type === 'rect') {
                 if (x >= el.x && x <= el.x + (el.w || 0) &&
                     y >= el.y && y <= el.y + (el.h || 0)) {
@@ -828,9 +875,10 @@ const Board = () => {
             } else if (el.type === 'text') {
                 const ctx = canvasRef.current?.getContext('2d');
                 if (ctx) {
-                    ctx.font = '16px Arial';
+                    ctx.font = `${el.fontSize || 16}px ${el.fontFamily || 'Arial'}`;
                     const textWidth = ctx.measureText(el.text || '').width;
-                    if (x >= el.x && x <= el.x + textWidth && y >= el.y - 16 && y <= el.y) {
+                    const height = el.fontSize || 16;
+                    if (x >= el.x && x <= el.x + textWidth && y >= el.y - height && y <= el.y + height/2) {
                         return el;
                     }
                 }
@@ -839,7 +887,6 @@ const Board = () => {
                     return el;
                 }
             } else if (el.type === 'arrow') {
-                // Arrow hit detection
                 let fromPoint = el.startPoint;
                 let toPoint = el.endPoint;
 
@@ -860,37 +907,26 @@ const Board = () => {
                 }
 
                 if (fromPoint && toPoint) {
-                    // Simple distance to segment check for straight lines
-                    // For curves/elbows, this is an approximation or needs more complex logic
-                    // Using the same logic as context menu for now
-                    const A = x - fromPoint.x;
-                    const B = y - fromPoint.y;
-                    const C = toPoint.x - fromPoint.x;
-                    const D = toPoint.y - fromPoint.y;
-                    
-                    const dot = A * C + B * D;
-                    const lenSq = C * C + D * D;
-                    let param = -1;
-                    if (lenSq !== 0) param = dot / lenSq;
-                    
-                    let xx, yy;
-                    
-                    if (param < 0) {
-                        xx = fromPoint.x;
-                        yy = fromPoint.y;
-                    } else if (param > 1) {
-                        xx = toPoint.x;
-                        yy = toPoint.y;
+                    if (el.arrowType === 'elbow') {
+                        const points = getArrowPoints(el);
+                        let hit = false;
+                        for (let j = 0; j < points.length - 1; j++) {
+                            if (distanceToSegment({x, y}, points[j], points[j+1]) < 10) {
+                                hit = true;
+                                break;
+                            }
+                        }
+                        if (hit) return el;
+                    } else if (el.arrowType === 'curved') {
+                         const dx = toPoint.x - fromPoint.x;
+                         const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
+                         const controlPoint2 = { x: toPoint.x - dx / 2, y: toPoint.y };
+                         if (distanceToBezier({x, y}, fromPoint, controlPoint1, controlPoint2, toPoint) < 10) {
+                             return el;
+                         }
                     } else {
-                        xx = fromPoint.x + param * C;
-                        yy = fromPoint.y + param * D;
+                        if (distanceToSegment({x, y}, fromPoint, toPoint) < 10) return el;
                     }
-                    
-                    const dx = x - xx;
-                    const dy = y - yy;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    
-                    if (dist < 10) return el;
                 }
             }
         }
@@ -899,7 +935,7 @@ const Board = () => {
 
     const getConnectionPointAtPosition = (x: number, y: number): { element: Element, point: ConnectionPoint } | null => {
         for (const el of elements) {
-            if (el.type === 'arrow') continue;
+            if (el.type === 'arrow' || el.isHidden) continue;
             const points = getConnectionPoints(el);
             for (const point of points) {
                 const dist = Math.sqrt(Math.pow(x - point.x, 2) + Math.pow(y - point.y, 2));
@@ -923,50 +959,12 @@ const Board = () => {
     const handleContextMenu = (e: React.MouseEvent) => {
         e.preventDefault();
         const { x, y } = getCanvasCoords(e);
-        
-        const clickedArrow = elements.find(el => {
-            if (el.type !== 'arrow') return false;
-            const fromEl = elements.find(e => e.id === el.fromId);
-            const toEl = elements.find(e => e.id === el.toId);
-            if (!fromEl || !toEl) return false;
-            
-            const fromPoints = getConnectionPoints(fromEl);
-            const toPoints = getConnectionPoints(toEl);
-            const fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
-            const toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
-            
-            const A = x - fromPoint.x;
-            const B = y - fromPoint.y;
-            const C = toPoint.x - fromPoint.x;
-            const D = toPoint.y - fromPoint.y;
-            
-            const dot = A * C + B * D;
-            const lenSq = C * C + D * D;
-            let param = -1;
-            if (lenSq !== 0) param = dot / lenSq;
-            
-            let xx, yy;
-            
-            if (param < 0) {
-                xx = fromPoint.x;
-                yy = fromPoint.y;
-            } else if (param > 1) {
-                xx = toPoint.x;
-                yy = toPoint.y;
-            } else {
-                xx = fromPoint.x + param * C;
-                yy = fromPoint.y + param * D;
+        const element = getElementAtPosition(x, y);
+        if (element) {
+            setContextMenu({ x: e.clientX, y: e.clientY, elementId: element.id });
+            if (!selectedElements.includes(element.id)) {
+                setSelectedElements([element.id]);
             }
-            
-            const dx = x - xx;
-            const dy = y - yy;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            
-            return dist < 10;
-        });
-
-        if (clickedArrow) {
-            setContextMenu({ x: e.clientX, y: e.clientY, elementId: clickedArrow.id });
         } else {
             setContextMenu(null);
         }
@@ -1481,6 +1479,29 @@ const Board = () => {
         setContextMenu(null);
     };
 
+    const toggleVisibility = (id: string) => {
+        const newElements = elements.map(el => {
+            if (el.id === id) {
+                return { ...el, isHidden: !el.isHidden };
+            }
+            return el;
+        });
+        setElements(newElements);
+        addToHistory(newElements);
+        emitElements(newElements);
+    };
+
+    const getIconForType = (type: string) => {
+        switch (type) {
+            case 'rect': return <Square size={14} />;
+            case 'circle': return <Circle size={14} />;
+            case 'text': return <Type size={14} />;
+            case 'image': return <Search size={14} />;
+            case 'arrow': return <ArrowRight size={14} />;
+            default: return <Square size={14} />;
+        }
+    };
+
     const handlersRef = useRef({
         undo, redo, paste, setTool, setSelectedElements, 
         copySelected, cutSelected, deleteSelected, handleImageUpload, 
@@ -1553,14 +1574,6 @@ const Board = () => {
                     break;
                 case 'f':
                     setTool('frame');
-                    break;
-                case 'c':
-                    if (e.ctrlKey || e.metaKey) {
-                        e.preventDefault();
-                        copySelected();
-                    } else {
-                        setTool('comment');
-                    }
                     break;
                 case 'i':
                     handleImageUpload();
@@ -1705,14 +1718,6 @@ const Board = () => {
                         <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">F</span>
                         <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Frame</span>
                     </button>
-                    <button 
-                        onClick={() => setTool('comment')}
-                        className={`p-2 rounded relative group ${tool === 'comment' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <MessageSquare size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">C</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Comment</span>
-                    </button>
                 </div>
             </div>
 
@@ -1725,7 +1730,44 @@ const Board = () => {
                     >
                         <Hand size={20} />
                     </button>
+                    <button
+                        onClick={() => setShowLayers(!showLayers)}
+                        className={`p-2 rounded border border-border shadow-sm ${showLayers ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-secondary text-muted-foreground'}`}
+                        title="Layers"
+                    >
+                        <Layers size={20} />
+                    </button>
                 </div>
+
+                {showLayers && (
+                    <div className="absolute top-16 right-4 w-64 bg-card border border-border rounded-lg shadow-lg flex flex-col max-h-[calc(100vh-100px)] z-20">
+                        <div className="p-2 border-b border-border font-bold text-sm flex justify-between items-center">
+                            <span>Layers</span>
+                            <span className="text-xs text-muted-foreground">{elements.length} elements</span>
+                        </div>
+                        <div className="overflow-y-auto flex-1 p-2 flex flex-col gap-1">
+                            {elements.slice().reverse().map((el, i) => (
+                                <div 
+                                    key={el.id}
+                                    className={`p-2 rounded text-xs flex items-center gap-2 cursor-pointer group ${selectedElements.includes(el.id) ? 'bg-primary/20 text-primary' : 'hover:bg-secondary'}`}
+                                    onClick={() => setSelectedElements([el.id])}
+                                >
+                                    {getIconForType(el.type)}
+                                    <span className="truncate flex-1">{el.text || el.type + ' ' + (elements.length - 1 - i)}</span>
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); toggleVisibility(el.id); }}
+                                        className="opacity-0 group-hover:opacity-100 hover:text-foreground text-muted-foreground"
+                                    >
+                                        {el.isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
+                                    </button>
+                                </div>
+                            ))}
+                            {elements.length === 0 && (
+                                <div className="text-center text-muted-foreground text-xs py-4">No elements</div>
+                            )}
+                        </div>
+                    </div>
+                )}
 
                 <canvas
                     ref={canvasRef}
@@ -1801,50 +1843,116 @@ const Board = () => {
 
                 {contextMenu && (
                     <div 
-                        className="absolute bg-card border border-border rounded shadow-lg p-2 z-50 flex flex-col gap-2"
+                        className="absolute bg-card border border-border rounded shadow-lg p-1 z-50 flex flex-col min-w-[200px]"
                         style={{ left: contextMenu.x, top: contextMenu.y }}
                     >
-                        <div className="text-xs font-bold mb-1">Arrow Style</div>
-                        <div className="flex gap-1">
-                            <button 
-                                onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'straight' })}
-                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
-                            >Straight</button>
-                            <button 
-                                onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'elbow' })}
-                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
-                            >Elbow</button>
-                            <button 
-                                onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'curved' })}
-                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
-                            >Curved</button>
+                        <button onClick={cutSelected} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                            <Scissors size={14} /> <span>Cut</span> <span className="ml-auto text-muted-foreground">Ctrl X</span>
+                        </button>
+                        <button onClick={copySelected} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                            <Copy size={14} /> <span>Copy</span> <span className="ml-auto text-muted-foreground">Ctrl C</span>
+                        </button>
+                        <button onClick={paste} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                            <Clipboard size={14} /> <span>Paste</span> <span className="ml-auto text-muted-foreground">Ctrl V</span>
+                        </button>
+                        <button onClick={() => { copySelected(); paste(); }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                            <Copy size={14} /> <span>Duplicate</span> <span className="ml-auto text-muted-foreground">Ctrl D</span>
+                        </button>
+                        <button onClick={() => setSelectedElements(elements.map(e => e.id))} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                            <MousePointer size={14} /> <span>Select all</span> <span className="ml-auto text-muted-foreground">Ctrl A</span>
+                        </button>
+                        
+                        <div className="h-px bg-border my-1" />
+                        
+                        <button className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left opacity-50 cursor-not-allowed">
+                            <Download size={14} /> <span>Export selection</span>
+                        </button>
+                        
+                        <div className="h-px bg-border my-1" />
+                        
+                        <div className="relative group/order">
+                            <button className="w-full flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                <BringToFront size={14} /> <span>Change Order</span> <ArrowRight size={12} className="ml-auto" />
+                            </button>
+                            <div className="absolute left-full top-0 ml-1 bg-card border border-border rounded shadow-lg p-1 flex flex-col min-w-[150px] hidden group-hover/order:flex">
+                                <button onClick={() => {
+                                    // Bring forward
+                                    const idx = elements.findIndex(e => e.id === contextMenu.elementId);
+                                    if (idx < elements.length - 1) {
+                                        const newEls = [...elements];
+                                        [newEls[idx], newEls[idx+1]] = [newEls[idx+1], newEls[idx]];
+                                        setElements(newEls);
+                                        emitElements(newEls);
+                                    }
+                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                    <span>Bring forward</span> <span className="ml-auto text-muted-foreground">Ctrl ]</span>
+                                </button>
+                                <button onClick={() => {
+                                    // Send backward
+                                    const idx = elements.findIndex(e => e.id === contextMenu.elementId);
+                                    if (idx > 0) {
+                                        const newEls = [...elements];
+                                        [newEls[idx], newEls[idx-1]] = [newEls[idx-1], newEls[idx]];
+                                        setElements(newEls);
+                                        emitElements(newEls);
+                                    }
+                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                    <span>Send backward</span> <span className="ml-auto text-muted-foreground">Ctrl [</span>
+                                </button>
+                                <button onClick={() => {
+                                    // Bring to front
+                                    const newEls = elements.filter(e => e.id !== contextMenu.elementId);
+                                    const el = elements.find(e => e.id === contextMenu.elementId);
+                                    if (el) {
+                                        newEls.push(el);
+                                        setElements(newEls);
+                                        emitElements(newEls);
+                                    }
+                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                    <span>Bring to front</span> <span className="ml-auto text-muted-foreground">]</span>
+                                </button>
+                                <button onClick={() => {
+                                    // Send to back
+                                    const newEls = elements.filter(e => e.id !== contextMenu.elementId);
+                                    const el = elements.find(e => e.id === contextMenu.elementId);
+                                    if (el) {
+                                        newEls.unshift(el);
+                                        setElements(newEls);
+                                        emitElements(newEls);
+                                    }
+                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                    <span>Send to back</span> <span className="ml-auto text-muted-foreground">[</span>
+                                </button>
+                            </div>
                         </div>
-                        <div className="w-full h-px bg-border" />
-                        <div className="flex gap-1">
-                            <button 
-                                onClick={() => updateArrowStyle(contextMenu.elementId, { lineStyle: 'solid' })}
-                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
-                            >Solid</button>
-                            <button 
-                                onClick={() => updateArrowStyle(contextMenu.elementId, { lineStyle: 'dashed' })}
-                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
-                            >Dashed</button>
-                            <button 
-                                onClick={() => updateArrowStyle(contextMenu.elementId, { lineStyle: 'dotted' })}
-                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
-                            >Dotted</button>
-                        </div>
-                         <div className="w-full h-px bg-border" />
-                         <button 
-                            onClick={() => {
-                                const newElements = elements.filter(e => e.id !== contextMenu.elementId);
-                                setElements(newElements);
-                                addToHistory(newElements);
-                                emitElements(newElements);
-                                setContextMenu(null);
-                            }}
-                            className="text-red-500 hover:bg-secondary p-1 rounded text-xs text-left"
-                        >Delete Arrow</button>
+
+                        <div className="h-px bg-border my-1" />
+
+                        <button onClick={deleteSelected} className="flex items-center gap-2 p-2 hover:bg-red-500/10 text-red-500 rounded text-xs text-left">
+                            <Trash2 size={14} /> <span>Delete</span> <span className="ml-auto">Del</span>
+                        </button>
+
+                        {/* Arrow specific options if arrow is selected */}
+                        {elements.find(e => e.id === contextMenu.elementId)?.type === 'arrow' && (
+                            <>
+                                <div className="h-px bg-border my-1" />
+                                <div className="text-[10px] font-bold px-2 py-1 text-muted-foreground">ARROW STYLE</div>
+                                <div className="flex gap-1 px-2">
+                                    <button 
+                                        onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'straight' })}
+                                        className="p-1 hover:bg-secondary rounded text-xs border border-border flex-1 text-center"
+                                    >Straight</button>
+                                    <button 
+                                        onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'elbow' })}
+                                        className="p-1 hover:bg-secondary rounded text-xs border border-border flex-1 text-center"
+                                    >Elbow</button>
+                                    <button 
+                                        onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'curved' })}
+                                        className="p-1 hover:bg-secondary rounded text-xs border border-border flex-1 text-center"
+                                    >Curved</button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
 
