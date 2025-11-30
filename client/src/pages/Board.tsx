@@ -4,8 +4,8 @@ import { AuthContext } from '../context/AuthContext';
 import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
 import {
-    Square, Circle, Type, Image as ImageIcon, Trash2, MousePointer,
-    ArrowRight, Copy, Clipboard, Palette, Undo, Redo, Hand,
+    Square, Circle, Type,  Trash2, MousePointer,
+    ArrowRight, Hand,
     Minus, CornerDownRight, Activity, ArrowLeft, ArrowLeftRight,
     Plus, Sparkles, MessageSquare, Frame, Search, AlignLeft, AlignCenter, AlignRight,
     Bold, Italic, Underline
@@ -135,20 +135,43 @@ const Board = () => {
         if (toPoint) handles.push({ type: 'end', x: toPoint.x, y: toPoint.y });
 
         if (el.arrowType === 'elbow' && fromPoint && toPoint) {
-            let midX = (fromPoint.x + toPoint.x) / 2;
-            let midY = (fromPoint.y + toPoint.y) / 2;
+            const points = getArrowPoints(el);
+            // We want the handle on the "middle" segment.
+            // getArrowPoints returns [Start, P1, P2, End] for Z-shape.
+            // Middle segment is P1 -> P2.
+            if (points.length >= 3) {
+                // If 4 points: S -> P1 -> P2 -> E. Middle is P1-P2.
+                // If 3 points (aligned): S -> P1 -> E. Middle is P1-E? No, usually 4 points for elbow unless aligned.
+                
+                // Let's stick to the previous logic for handle placement as it was robust enough
+                // But we can use the points to be sure.
+                
+                // Actually, the previous logic was:
+                // if vertical start: handle at (midX, midY) where midX is variable, midY is fixed?
+                // No, if vertical start: S -> (S.x, midY) -> (E.x, midY) -> E.
+                // The middle segment is horizontal: y = midY.
+                // We want to drag it vertically? No, we drag the horizontal segment up/down.
+                // So handle should be at ((S.x + E.x)/2, midY).
+                
+                let midX = (fromPoint.x + toPoint.x) / 2;
+                let midY = (fromPoint.y + toPoint.y) / 2;
 
-            if (el.controlPoint) {
-                midX = el.controlPoint.x;
-                midY = el.controlPoint.y;
-            }
+                if (el.controlPoint) {
+                    midX = el.controlPoint.x;
+                    midY = el.controlPoint.y;
+                }
 
-            const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
-            
-            if (isVerticalStart) {
-                handles.push({ type: 'control', x: (fromPoint.x + toPoint.x) / 2, y: midY });
-            } else {
-                handles.push({ type: 'control', x: midX, y: (fromPoint.y + toPoint.y) / 2 });
+                const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
+                
+                if (isVerticalStart) {
+                    // Middle segment is horizontal at y=midY. We drag it up/down.
+                    // Handle should be at center of that segment.
+                    // Segment is from (fromPoint.x, midY) to (toPoint.x, midY).
+                    handles.push({ type: 'control', x: (fromPoint.x + toPoint.x) / 2, y: midY });
+                } else {
+                    // Middle segment is vertical at x=midX. We drag it left/right.
+                    handles.push({ type: 'control', x: midX, y: (fromPoint.y + toPoint.y) / 2 });
+                }
             }
         }
 
@@ -323,6 +346,75 @@ const Board = () => {
         return [];
     };
 
+    const getArrowPoints = (el: Element): {x: number, y: number}[] => {
+        let fromPoint = el.startPoint;
+        let toPoint = el.endPoint;
+
+        if (el.fromId && el.fromPoint) {
+            const fromEl = elements.find(e => e.id === el.fromId);
+            if (fromEl) {
+                const fromPoints = getConnectionPoints(fromEl);
+                fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
+            }
+        }
+        
+        if (el.toId && el.toPoint) {
+            const toEl = elements.find(e => e.id === el.toId);
+            if (toEl) {
+                const toPoints = getConnectionPoints(toEl);
+                toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
+            }
+        }
+
+        if (!fromPoint || !toPoint) return [];
+
+        const points: {x: number, y: number}[] = [{x: fromPoint.x, y: fromPoint.y}];
+
+        if (el.arrowType === 'elbow') {
+            let midX = (fromPoint.x + toPoint.x) / 2;
+            let midY = (fromPoint.y + toPoint.y) / 2;
+
+            if (el.controlPoint) {
+                midX = el.controlPoint.x;
+                midY = el.controlPoint.y;
+            }
+
+            const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
+
+            if (isVerticalStart) {
+                points.push({ x: fromPoint.x, y: midY });
+                points.push({ x: toPoint.x, y: midY });
+            } else {
+                points.push({ x: midX, y: fromPoint.y });
+                points.push({ x: midX, y: toPoint.y });
+            }
+        }
+
+        points.push({x: toPoint.x, y: toPoint.y});
+        return points;
+    };
+
+    const drawRoundedPath = (ctx: CanvasRenderingContext2D, points: {x: number, y: number}[], radius: number) => {
+        if (points.length < 2) return;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        
+        for (let i = 1; i < points.length - 1; i++) {
+            const p0 = points[i-1];
+            const p1 = points[i];
+            const p2 = points[i+1];
+            // Limit radius to half the length of the shortest adjacent segment to avoid artifacts
+            // We check both X and Y distances, one will be 0 for orthogonal lines, so we take the max of the diffs
+            const dist1 = Math.max(Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y));
+            const dist2 = Math.max(Math.abs(p2.x - p1.x), Math.abs(p2.y - p1.y));
+            const r = Math.min(radius, dist1/2, dist2/2); 
+            ctx.arcTo(p1.x, p1.y, p2.x, p2.y, r);
+        }
+        
+        ctx.lineTo(points[points.length-1].x, points[points.length-1].y);
+        ctx.stroke();
+    };
+
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -360,43 +452,17 @@ const Board = () => {
             else if (el.lineStyle === 'dotted') ctx.setLineDash([2, 4]);
             else ctx.setLineDash([]);
 
-            ctx.beginPath();
-            
             let endAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x);
 
             if (el.arrowType === 'elbow') {
-                let midX = (fromPoint.x + toPoint.x) / 2;
-                let midY = (fromPoint.y + toPoint.y) / 2;
+                const points = getArrowPoints(el);
+                drawRoundedPath(ctx, points, 12); // Radius 12
 
-                if (el.controlPoint) {
-                    midX = el.controlPoint.x;
-                    midY = el.controlPoint.y;
-                }
-
-                const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
-
-                ctx.moveTo(fromPoint.x, fromPoint.y);
-                
-                if (isVerticalStart) {
-                    ctx.lineTo(fromPoint.x, midY);
-                    ctx.lineTo(toPoint.x, midY);
-                    ctx.lineTo(toPoint.x, toPoint.y);
-                    
-                    if (Math.abs(toPoint.y - midY) > 0.1) {
-                        endAngle = Math.atan2(toPoint.y - midY, 0);
-                    } else {
-                        endAngle = Math.atan2(0, toPoint.x - fromPoint.x);
-                    }
-                } else {
-                    ctx.lineTo(midX, fromPoint.y);
-                    ctx.lineTo(midX, toPoint.y);
-                    ctx.lineTo(toPoint.x, toPoint.y);
-                    
-                    if (Math.abs(toPoint.x - midX) > 0.1) {
-                        endAngle = Math.atan2(0, toPoint.x - midX);
-                    } else {
-                        endAngle = Math.atan2(toPoint.y - fromPoint.y, 0);
-                    }
+                // Calculate end angle from last segment
+                if (points.length >= 2) {
+                    const pLast = points[points.length - 1];
+                    const pPrev = points[points.length - 2];
+                    endAngle = Math.atan2(pLast.y - pPrev.y, pLast.x - pPrev.x);
                 }
             } else if (el.arrowType === 'curved') {
                 const dx = toPoint.x - fromPoint.x;
@@ -407,10 +473,12 @@ const Board = () => {
                 // Approximate end angle for bezier
                 endAngle = Math.atan2(toPoint.y - controlPoint2.y, toPoint.x - controlPoint2.x);
             } else {
+                ctx.beginPath();
                 ctx.moveTo(fromPoint.x, fromPoint.y);
                 ctx.lineTo(toPoint.x, toPoint.y);
+                ctx.stroke();
             }
-            ctx.stroke();
+            // ctx.stroke(); // Removed because drawRoundedPath strokes, and others stroke manually
             ctx.setLineDash([]);
 
             const headLength = 15;
@@ -419,18 +487,13 @@ const Board = () => {
             if (el.arrowHead === 'start' || el.arrowHead === 'both') {
                 let startAngle;
                 if (el.arrowType === 'elbow') {
-                    let midX = (fromPoint.x + toPoint.x) / 2;
-                    let midY = (fromPoint.y + toPoint.y) / 2;
-                    if (el.controlPoint) {
-                        midX = el.controlPoint.x;
-                        midY = el.controlPoint.y;
-                    }
-                    const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
-
-                    if (isVerticalStart) {
-                        startAngle = midY > fromPoint.y ? -Math.PI / 2 : Math.PI / 2;
+                    const points = getArrowPoints(el);
+                    if (points.length >= 2) {
+                        const p0 = points[0];
+                        const p1 = points[1];
+                        startAngle = Math.atan2(p1.y - p0.y, p1.x - p0.x) + Math.PI;
                     } else {
-                        startAngle = midX > fromPoint.x ? Math.PI : 0;
+                        startAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x) + Math.PI;
                     }
                 } else if (el.arrowType === 'curved') {
                     const dx = toPoint.x - fromPoint.x;
