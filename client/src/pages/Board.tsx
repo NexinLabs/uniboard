@@ -7,7 +7,8 @@ import {
     Square, Circle, Type, Image as ImageIcon, Trash2, MousePointer,
     ArrowRight, Copy, Clipboard, Palette, Undo, Redo, Hand,
     Minus, CornerDownRight, Activity, ArrowLeft, ArrowLeftRight,
-    Plus, Sparkles, MessageSquare, Frame, Search
+    Plus, Sparkles, MessageSquare, Frame, Search, AlignLeft, AlignCenter, AlignRight,
+    Bold, Italic, Underline
 } from 'lucide-react';
 
 type Tool = 'select' | 'rect' | 'circle' | 'text' | 'image' | 'arrow' | 'line' | 'draw' | 'frame' | 'comment' | 'pan';
@@ -37,12 +38,37 @@ interface Element {
     endPoint?: { x: number, y: number };
     // New properties
     fontSize?: number;
+    fontFamily?: string;
     textAlign?: 'center' | 'left' | 'right';
     arrowType?: 'straight' | 'elbow' | 'curved';
     lineStyle?: 'solid' | 'dashed' | 'dotted';
     lineWidth?: number;
     arrowHead?: 'none' | 'start' | 'end' | 'both';
+    backgroundColor?: string;
+    opacity?: number;
+    strokeWidth?: number;
+    textColor?: string;
+    textWrap?: boolean;
 }
+
+const getWrappedLines = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
+    const words = text.split(' ');
+    let lines = [];
+    let currentLine = words[0];
+
+    for (let i = 1; i < words.length; i++) {
+        const word = words[i];
+        const width = ctx.measureText(currentLine + " " + word).width;
+        if (width < maxWidth) {
+            currentLine += " " + word;
+        } else {
+            lines.push(currentLine);
+            currentLine = word;
+        }
+    }
+    lines.push(currentLine);
+    return lines;
+};
 
 type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
@@ -364,10 +390,32 @@ const Board = () => {
 
         elements.filter(el => el.type !== 'arrow').forEach(el => {
             const isSelected = selectedElements.includes(el.id);
-
+            
             if (el.type === 'rect') {
+                ctx.globalAlpha = el.opacity || 1;
+                if (el.backgroundColor) {
+                    ctx.fillStyle = el.backgroundColor;
+                    const radius = 8;
+                    const x = el.x;
+                    const y = el.y;
+                    const w = el.w || 0;
+                    const h = el.h || 0;
+                    ctx.beginPath();
+                    ctx.moveTo(x + radius, y);
+                    ctx.lineTo(x + w - radius, y);
+                    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+                    ctx.lineTo(x + w, y + h - radius);
+                    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+                    ctx.lineTo(x + radius, y + h);
+                    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+                    ctx.lineTo(x, y + radius);
+                    ctx.quadraticCurveTo(x, y, x + radius, y);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+
                 ctx.strokeStyle = el.color || 'white';
-                ctx.lineWidth = isSelected ? 3 : 2;
+                ctx.lineWidth = (el.strokeWidth || 2) + (isSelected ? 1 : 0);
                 const radius = 8;
                 const x = el.x;
                 const y = el.y;
@@ -386,12 +434,33 @@ const Board = () => {
                 ctx.closePath();
                 ctx.stroke();
 
+                // Reset alpha for text
+                ctx.globalAlpha = 1;
+
                 if (el.text && el.id !== editingElementId) {
-                    ctx.fillStyle = el.color || 'white';
-                    ctx.font = `${el.fontSize || 16}px Arial`;
+                    ctx.fillStyle = el.textColor || el.color || 'white';
+                    const fontSize = el.fontSize || 16;
+                    ctx.font = `${fontSize}px ${el.fontFamily || 'Arial'}`;
                     ctx.textAlign = el.textAlign || 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillText(el.text, x + w/2, y + h/2);
+                    
+                    let textX = x + w/2;
+                    if (el.textAlign === 'left') textX = x + 10;
+                    if (el.textAlign === 'right') textX = x + w - 10;
+
+                    if (el.textWrap) {
+                        const maxWidth = w - 20;
+                        const lines = getWrappedLines(ctx, el.text, maxWidth);
+                        const lineHeight = fontSize * 1.2;
+                        const totalHeight = lines.length * lineHeight;
+                        let startY = y + h/2 - totalHeight/2 + lineHeight/2;
+
+                        lines.forEach((line, i) => {
+                            ctx.fillText(line, textX, startY + i * lineHeight);
+                        });
+                    } else {
+                        ctx.fillText(el.text, textX, y + h/2);
+                    }
                 }
 
                 if (tool === 'arrow' || isSelected) {
@@ -408,18 +477,47 @@ const Board = () => {
                     });
                 }
             } else if (el.type === 'circle') {
+                ctx.globalAlpha = el.opacity || 1;
+                if (el.backgroundColor) {
+                    ctx.fillStyle = el.backgroundColor;
+                    ctx.beginPath();
+                    ctx.arc(el.x, el.y, el.radius || 0, 0, 2 * Math.PI);
+                    ctx.fill();
+                }
+
                 ctx.strokeStyle = el.color || 'white';
-                ctx.lineWidth = isSelected ? 3 : 2;
+                ctx.lineWidth = (el.strokeWidth || 2) + (isSelected ? 1 : 0);
                 ctx.beginPath();
                 ctx.arc(el.x, el.y, el.radius || 0, 0, 2 * Math.PI);
                 ctx.stroke();
 
+                // Reset alpha for text
+                ctx.globalAlpha = 1;
+
                 if (el.text && el.id !== editingElementId) {
-                    ctx.fillStyle = el.color || 'white';
-                    ctx.font = `${el.fontSize || 16}px Arial`;
+                    ctx.fillStyle = el.textColor || el.color || 'white';
+                    const fontSize = el.fontSize || 16;
+                    ctx.font = `${fontSize}px ${el.fontFamily || 'Arial'}`;
                     ctx.textAlign = el.textAlign || 'center';
                     ctx.textBaseline = 'middle';
-                    ctx.fillText(el.text, el.x, el.y);
+
+                    let textX = el.x;
+                    if (el.textAlign === 'left') textX = el.x - (el.radius || 0) + 10;
+                    if (el.textAlign === 'right') textX = el.x + (el.radius || 0) - 10;
+
+                    if (el.textWrap) {
+                        const maxWidth = (el.radius || 0) * 2 - 20;
+                        const lines = getWrappedLines(ctx, el.text, maxWidth);
+                        const lineHeight = fontSize * 1.2;
+                        const totalHeight = lines.length * lineHeight;
+                        let startY = el.y - totalHeight/2 + lineHeight/2;
+
+                        lines.forEach((line, i) => {
+                            ctx.fillText(line, textX, startY + i * lineHeight);
+                        });
+                    } else {
+                        ctx.fillText(el.text, textX, el.y);
+                    }
                 }
 
                 if (tool === 'arrow' || isSelected) {
@@ -436,9 +534,10 @@ const Board = () => {
                     });
                 }
             } else if (el.type === 'text') {
-                ctx.fillStyle = el.color || 'white';
-                ctx.font = '16px Arial';
-                ctx.textAlign = 'left';
+                ctx.globalAlpha = el.opacity || 1;
+                ctx.fillStyle = el.textColor || el.color || 'white';
+                ctx.font = `${el.fontSize || 16}px ${el.fontFamily || 'Arial'}`;
+                ctx.textAlign = el.textAlign || 'left';
                 ctx.textBaseline = 'alphabetic';
                 ctx.fillText(el.text || '', el.x, el.y);
                 if (isSelected) {
@@ -447,6 +546,7 @@ const Board = () => {
                     ctx.strokeRect(el.x - 2, el.y - 18, textWidth + 4, 20);
                 }
             } else if (el.type === 'image' && el.imageUrl) {
+                ctx.globalAlpha = el.opacity || 1;
                 const img = new Image();
                 img.src = el.imageUrl;
                 if (img.complete) {
@@ -458,6 +558,8 @@ const Board = () => {
                     }
                 }
             }
+            
+            ctx.globalAlpha = 1;
 
             if (isSelected && (el.type === 'rect' || el.type === 'circle' || el.type === 'image')) {
                 const handles = getResizeHandles(el);
@@ -1123,6 +1225,39 @@ const Board = () => {
         updateSelectedElements({ color });
     };
 
+    const changeShape = (newType: 'rect' | 'circle') => {
+        if (selectedElements.length === 0) return;
+        const newElements = elements.map(el => {
+            if (selectedElements.includes(el.id)) {
+                if (el.type === newType) return el;
+                
+                const updates: Partial<Element> = { type: newType };
+                
+                if (newType === 'circle' && el.type === 'rect') {
+                    // Rect to Circle
+                    const size = Math.min(el.w || 50, el.h || 50);
+                    updates.radius = size / 2;
+                    // Center it (Rect x,y is top-left, Circle x,y is center)
+                    updates.x = el.x + (el.w || 0)/2;
+                    updates.y = el.y + (el.h || 0)/2;
+                } else if (newType === 'rect' && el.type === 'circle') {
+                    // Circle to Rect
+                    const r = el.radius || 25;
+                    updates.w = r * 2;
+                    updates.h = r * 2;
+                    // Top-left (Circle x,y is center, Rect x,y is top-left)
+                    updates.x = el.x - r;
+                    updates.y = el.y - r;
+                }
+                return { ...el, ...updates };
+            }
+            return el;
+        });
+        setElements(newElements);
+        addToHistory(newElements);
+        emitElements(newElements);
+    };
+
     const updateArrowStyle = (id: string, updates: Partial<Element>) => {
         const newElements = elements.map(el => {
             if (el.id === id) {
@@ -1136,9 +1271,27 @@ const Board = () => {
         setContextMenu(null);
     };
 
+    const handlersRef = useRef({
+        undo, redo, paste, setTool, setSelectedElements, 
+        copySelected, cutSelected, deleteSelected, handleImageUpload, 
+        setArrowStart, elements, clipboard, history, historyIndex
+    });
+    
+    handlersRef.current = {
+        undo, redo, paste, setTool, setSelectedElements, 
+        copySelected, cutSelected, deleteSelected, handleImageUpload, 
+        setArrowStart, elements, clipboard, history, historyIndex
+    };
+
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+            
+            const { 
+                undo, redo, paste, setTool, setSelectedElements, 
+                copySelected, cutSelected, deleteSelected, handleImageUpload, 
+                setArrowStart, elements 
+            } = handlersRef.current;
 
             if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
                 e.preventDefault();
@@ -1226,8 +1379,11 @@ const Board = () => {
         };
 
         const handleKeyUp = (e: KeyboardEvent) => {
-            if (e.key === ' ' && tool === 'pan') {
-                setTool('select');
+            if (e.key === ' ' && handlersRef.current.setTool) {
+                // We can't easily check previous tool here without more state tracking
+                // But usually space is for pan, so releasing it goes back to select
+                // Or we could track 'previousTool' in a ref
+                handlersRef.current.setTool('select');
             }
         };
 
@@ -1237,7 +1393,7 @@ const Board = () => {
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
         };
-    }, [tool, selectedElements, elements, clipboard, historyIndex, history]);
+    }, []); // Empty dependency array to prevent re-binding
 
     return (
         <div className="h-[calc(100vh-80px)] bg-gray-950 rounded-lg border border-border relative overflow-hidden flex">
@@ -1484,28 +1640,197 @@ const Board = () => {
 
                 {selectedElements.length > 0 && (
                     <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-card border border-border rounded-lg shadow-lg p-2 flex gap-2 items-center z-50">
-                        {/* Color Picker */}
+                        {/* Stroke Color Picker */}
                         <div className="relative group">
                             <button
                                 className="p-2 hover:bg-secondary rounded border border-border"
-                                title="Color"
+                                title="Stroke Color"
                             >
                                 <div 
                                     className="w-4 h-4 rounded-full border border-gray-500"
                                     style={{ backgroundColor: elements.find(el => el.id === selectedElements[0])?.color || '#ffffff' }}
                                 />
                             </button>
-                            <div className="absolute bottom-full left-0 mb-2 hidden group-hover:block bg-card p-2 rounded border border-border shadow-lg">
+                            <div className="absolute bottom-full left-0 mb-0 hidden group-hover:block bg-card p-2 rounded border border-border shadow-lg">
                                 <input
                                     type="color"
-                                    value={elements.find(el => el.id === selectedElements[0])?.color || '#ffffff'}
-                                    onChange={(e) => updateSelectedColor(e.target.value)}
+                                    defaultValue={elements.find(el => el.id === selectedElements[0])?.color || '#ffffff'}
+                                    onBlur={(e) => updateSelectedColor(e.target.value)}
                                     className="w-32 h-8 cursor-pointer"
                                 />
                             </div>
                         </div>
 
+                        {/* Background Color Picker (for shapes) */}
+                        {(elements.find(el => el.id === selectedElements[0])?.type === 'rect' || elements.find(el => el.id === selectedElements[0])?.type === 'circle') && (
+                            <div className="relative group">
+                                <button
+                                    className="p-2 hover:bg-secondary rounded border border-border"
+                                    title="Background Color"
+                                >
+                                    <div 
+                                        className="w-4 h-4 rounded-sm border border-gray-500"
+                                        style={{ backgroundColor: elements.find(el => el.id === selectedElements[0])?.backgroundColor || 'transparent' }}
+                                    />
+                                </button>
+                                <div className="absolute bottom-full left-0 mb-0 hidden group-hover:block bg-card p-2 rounded border border-border shadow-lg flex flex-col gap-2">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs">Fill:</span>
+                                        <input
+                                            type="color"
+                                            defaultValue={elements.find(el => el.id === selectedElements[0])?.backgroundColor || '#ffffff'}
+                                            onBlur={(e) => updateSelectedElements({ backgroundColor: e.target.value })}
+                                            className="w-24 h-6 cursor-pointer"
+                                        />
+                                        <button 
+                                            onClick={() => updateSelectedElements({ backgroundColor: undefined })}
+                                            className="text-xs text-red-500 hover:underline"
+                                        >
+                                            Clear
+                                        </button>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs">Opacity:</span>
+                                        <input
+                                            type="range"
+                                            min="0.1"
+                                            max="1"
+                                            step="0.1"
+                                            defaultValue={elements.find(el => el.id === selectedElements[0])?.opacity || 1}
+                                            onMouseUp={(e) => updateSelectedElements({ opacity: parseFloat((e.target as HTMLInputElement).value) })}
+                                            className="w-24"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="w-px h-6 bg-border mx-1" />
+
+                        {/* Text Options */}
+                        {(elements.find(el => el.id === selectedElements[0])?.type === 'text' || elements.find(el => el.id === selectedElements[0])?.text) && (
+                            <>
+                                <div className="relative group">
+                                    <button className="p-1.5 rounded hover:bg-secondary text-xs font-bold w-8 flex items-center justify-center">
+                                        Aa
+                                    </button>
+                                    <div className="absolute bottom-full left-0 mb-0 hidden group-hover:flex flex-col bg-card p-2 rounded border border-border shadow-lg gap-2 min-w-[180px]">
+                                        {/* Text Color */}
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs w-8">Color:</span>
+                                            <input
+                                                type="color"
+                                                defaultValue={elements.find(el => el.id === selectedElements[0])?.textColor || elements.find(el => el.id === selectedElements[0])?.color || '#ffffff'}
+                                                onBlur={(e) => updateSelectedElements({ textColor: e.target.value })}
+                                                className="flex-1 h-6 cursor-pointer"
+                                            />
+                                        </div>
+                                        
+                                        <div className="w-full h-px bg-border" />
+
+                                        {/* Font Size */}
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs w-8">Size:</span>
+                                            <input
+                                                type="range"
+                                                min="12"
+                                                max="72"
+                                                defaultValue={elements.find(el => el.id === selectedElements[0])?.fontSize || 16}
+                                                onMouseUp={(e) => updateSelectedElements({ fontSize: parseInt((e.target as HTMLInputElement).value) })}
+                                                className="flex-1 h-1 bg-secondary rounded-lg appearance-none cursor-pointer"
+                                            />
+                                            <span className="text-xs w-4 text-right">{elements.find(el => el.id === selectedElements[0])?.fontSize || 16}</span>
+                                        </div>
+
+                                        <div className="w-full h-px bg-border" />
+
+                                        {/* Text Wrap */}
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                type="checkbox"
+                                                id="textWrap"
+                                                checked={elements.find(el => el.id === selectedElements[0])?.textWrap || false}
+                                                onChange={(e) => updateSelectedElements({ textWrap: e.target.checked })}
+                                                className="cursor-pointer"
+                                            />
+                                            <label htmlFor="textWrap" className="text-xs cursor-pointer select-none">Wrap Text</label>
+                                        </div>
+
+                                        <div className="w-full h-px bg-border" />
+
+                                        {/* Font Family */}
+                                        <div className="flex flex-col gap-1">
+                                            <button onClick={() => updateSelectedElements({ fontFamily: 'Arial' })} className="text-left px-2 py-1 hover:bg-secondary rounded text-xs font-sans">Sans</button>
+                                            <button onClick={() => updateSelectedElements({ fontFamily: 'Times New Roman' })} className="text-left px-2 py-1 hover:bg-secondary rounded text-xs font-serif">Serif</button>
+                                            <button onClick={() => updateSelectedElements({ fontFamily: 'Courier New' })} className="text-left px-2 py-1 hover:bg-secondary rounded text-xs font-mono">Mono</button>
+                                            <button onClick={() => updateSelectedElements({ fontFamily: 'Brush Script MT' })} className="text-left px-2 py-1 hover:bg-secondary rounded text-xs italic">Hand</button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="flex bg-secondary/50 rounded p-1 gap-1">
+                                    <button
+                                        onClick={() => updateSelectedElements({ textAlign: 'left' })}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.textAlign === 'left' ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="Align Left"
+                                    >
+                                        <AlignLeft size={16} />
+                                    </button>
+                                    <button
+                                        onClick={() => updateSelectedElements({ textAlign: 'center' })}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.textAlign === 'center' || !elements.find(el => el.id === selectedElements[0])?.textAlign ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="Align Center"
+                                    >
+                                        <AlignCenter size={16} />
+                                    </button>
+                                    <button
+                                        onClick={() => updateSelectedElements({ textAlign: 'right' })}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.textAlign === 'right' ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="Align Right"
+                                    >
+                                        <AlignRight size={16} />
+                                    </button>
+                                </div>
+
+                                <div className="w-px h-6 bg-border mx-1" />
+                            </>
+                        )}
+
+                        {/* Shape Options */}
+                        {(elements.find(el => el.id === selectedElements[0])?.type === 'rect' || elements.find(el => el.id === selectedElements[0])?.type === 'circle') && (
+                            <>
+                                <div className="flex bg-secondary/50 rounded p-1 gap-1">
+                                    <button
+                                        onClick={() => changeShape('rect')}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'rect' ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="Rectangle"
+                                    >
+                                        <Square size={16} />
+                                    </button>
+                                    <button
+                                        onClick={() => changeShape('circle')}
+                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'circle' ? 'bg-primary text-primary-foreground' : ''}`}
+                                        title="Circle"
+                                    >
+                                        <Circle size={16} />
+                                    </button>
+                                </div>
+                                
+                                <div className="flex items-center gap-1 px-1">
+                                    <Minus size={14} className="text-muted-foreground" />
+                                    <input
+                                        type="range"
+                                        min="1"
+                                        max="10"
+                                        defaultValue={elements.find(el => el.id === selectedElements[0])?.strokeWidth || 2}
+                                        onMouseUp={(e) => updateSelectedElements({ strokeWidth: parseInt((e.target as HTMLInputElement).value) })}
+                                        className="w-16 h-1 bg-secondary rounded-lg appearance-none cursor-pointer"
+                                    />
+                                </div>
+
+                                <div className="w-px h-6 bg-border mx-1" />
+                            </>
+                        )}
 
                         {/* Arrow Specific Controls */}
                         {elements.find(el => el.id === selectedElements[0])?.type === 'arrow' && (
