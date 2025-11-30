@@ -49,6 +49,7 @@ interface Element {
     strokeWidth?: number;
     textColor?: string;
     textWrap?: boolean;
+    controlPoint?: { x: number, y: number };
 }
 
 const getWrappedLines = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
@@ -100,11 +101,59 @@ const Board = () => {
     // New state for advanced features
     const [editingElementId, setEditingElementId] = useState<string | null>(null);
     const [resizeHandle, setResizeHandle] = useState<ResizeHandle | null>(null);
+    const [arrowHandle, setArrowHandle] = useState<{ type: 'start' | 'end' | 'control', x: number, y: number } | null>(null);
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, elementId: string } | null>(null);
 
     const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState(false);
     const zoom = 1;
+
+    const getArrowHandles = (el: Element): { type: 'start' | 'end' | 'control', x: number, y: number }[] => {
+        if (el.type !== 'arrow') return [];
+        const handles: { type: 'start' | 'end' | 'control', x: number, y: number }[] = [];
+        
+        let fromPoint = el.startPoint;
+        let toPoint = el.endPoint;
+
+        if (el.fromId && el.fromPoint) {
+            const fromEl = elements.find(e => e.id === el.fromId);
+            if (fromEl) {
+                const fromPoints = getConnectionPoints(fromEl);
+                fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
+            }
+        }
+        
+        if (el.toId && el.toPoint) {
+            const toEl = elements.find(e => e.id === el.toId);
+            if (toEl) {
+                const toPoints = getConnectionPoints(toEl);
+                toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
+            }
+        }
+
+        if (fromPoint) handles.push({ type: 'start', x: fromPoint.x, y: fromPoint.y });
+        if (toPoint) handles.push({ type: 'end', x: toPoint.x, y: toPoint.y });
+
+        if (el.arrowType === 'elbow' && fromPoint && toPoint) {
+            let midX = (fromPoint.x + toPoint.x) / 2;
+            let midY = (fromPoint.y + toPoint.y) / 2;
+
+            if (el.controlPoint) {
+                midX = el.controlPoint.x;
+                midY = el.controlPoint.y;
+            }
+
+            const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
+            
+            if (isVerticalStart) {
+                handles.push({ type: 'control', x: (fromPoint.x + toPoint.x) / 2, y: midY });
+            } else {
+                handles.push({ type: 'control', x: midX, y: (fromPoint.y + toPoint.y) / 2 });
+            }
+        }
+
+        return handles;
+    };
 
     const getResizeHandles = (el: Element): { type: ResizeHandle, x: number, y: number }[] => {
         if (el.type === 'rect' || el.type === 'image') {
@@ -249,14 +298,18 @@ const Board = () => {
     };
 
     const getConnectionPoints = (el: Element): ConnectionPoint[] => {
-        if (el.type === 'rect') {
-            const centerX = el.x + (el.w || 0) / 2;
-            const centerY = el.y + (el.h || 0) / 2;
+        if (el.type === 'rect' || el.type === 'image') {
+            const x = el.x;
+            const y = el.y;
+            const w = el.w || (el.type === 'image' ? 200 : 0);
+            const h = el.h || (el.type === 'image' ? 200 : 0);
+            const centerX = x + w / 2;
+            const centerY = y + h / 2;
             return [
-                { x: centerX, y: el.y, position: 'top' },
-                { x: el.x + (el.w || 0), y: centerY, position: 'right' },
-                { x: centerX, y: el.y + (el.h || 0), position: 'bottom' },
-                { x: el.x, y: centerY, position: 'left' },
+                { x: centerX, y: y, position: 'top' },
+                { x: x + w, y: centerY, position: 'right' },
+                { x: centerX, y: y + h, position: 'bottom' },
+                { x: x, y: centerY, position: 'left' },
             ];
         } else if (el.type === 'circle') {
             const r = el.radius || 0;
@@ -312,16 +365,38 @@ const Board = () => {
             let endAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x);
 
             if (el.arrowType === 'elbow') {
-                const midX = (fromPoint.x + toPoint.x) / 2;
+                let midX = (fromPoint.x + toPoint.x) / 2;
+                let midY = (fromPoint.y + toPoint.y) / 2;
+
+                if (el.controlPoint) {
+                    midX = el.controlPoint.x;
+                    midY = el.controlPoint.y;
+                }
+
+                const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
+
                 ctx.moveTo(fromPoint.x, fromPoint.y);
-                ctx.lineTo(midX, fromPoint.y);
-                ctx.lineTo(midX, toPoint.y);
-                ctx.lineTo(toPoint.x, toPoint.y);
                 
-                if (Math.abs(fromPoint.y - toPoint.y) > 0) {
-                     endAngle = toPoint.y > fromPoint.y ? Math.PI / 2 : -Math.PI / 2;
+                if (isVerticalStart) {
+                    ctx.lineTo(fromPoint.x, midY);
+                    ctx.lineTo(toPoint.x, midY);
+                    ctx.lineTo(toPoint.x, toPoint.y);
+                    
+                    if (Math.abs(toPoint.y - midY) > 0.1) {
+                        endAngle = Math.atan2(toPoint.y - midY, 0);
+                    } else {
+                        endAngle = Math.atan2(0, toPoint.x - fromPoint.x);
+                    }
                 } else {
-                     endAngle = toPoint.x > fromPoint.x ? 0 : Math.PI;
+                    ctx.lineTo(midX, fromPoint.y);
+                    ctx.lineTo(midX, toPoint.y);
+                    ctx.lineTo(toPoint.x, toPoint.y);
+                    
+                    if (Math.abs(toPoint.x - midX) > 0.1) {
+                        endAngle = Math.atan2(0, toPoint.x - midX);
+                    } else {
+                        endAngle = Math.atan2(toPoint.y - fromPoint.y, 0);
+                    }
                 }
             } else if (el.arrowType === 'curved') {
                 const dx = toPoint.x - fromPoint.x;
@@ -344,10 +419,18 @@ const Board = () => {
             if (el.arrowHead === 'start' || el.arrowHead === 'both') {
                 let startAngle;
                 if (el.arrowType === 'elbow') {
-                    if (Math.abs(fromPoint.y - toPoint.y) > 0) {
-                        startAngle = toPoint.y > fromPoint.y ? -Math.PI / 2 : Math.PI / 2;
+                    let midX = (fromPoint.x + toPoint.x) / 2;
+                    let midY = (fromPoint.y + toPoint.y) / 2;
+                    if (el.controlPoint) {
+                        midX = el.controlPoint.x;
+                        midY = el.controlPoint.y;
+                    }
+                    const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
+
+                    if (isVerticalStart) {
+                        startAngle = midY > fromPoint.y ? -Math.PI / 2 : Math.PI / 2;
                     } else {
-                        startAngle = toPoint.x > fromPoint.x ? Math.PI : 0;
+                        startAngle = midX > fromPoint.x ? Math.PI : 0;
                     }
                 } else if (el.arrowType === 'curved') {
                     const dx = toPoint.x - fromPoint.x;
@@ -574,6 +657,26 @@ const Board = () => {
                 });
             }
         });
+
+        if (selectedElements.length === 1) {
+            const el = elements.find(e => e.id === selectedElements[0]);
+            if (el && el.type === 'arrow') {
+                const handles = getArrowHandles(el);
+                handles.forEach(handle => {
+                    ctx.fillStyle = handle.type === 'control' ? '#f59e0b' : 'white';
+                    ctx.strokeStyle = '#3b82f6';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    if (handle.type === 'control') {
+                        ctx.arc(handle.x, handle.y, 5, 0, 2 * Math.PI);
+                    } else {
+                        ctx.rect(handle.x - 4, handle.y - 4, 8, 8);
+                    }
+                    ctx.fill();
+                    ctx.stroke();
+                });
+            }
+        }
 
         if ((tool === 'arrow' || tool === 'line') && arrowStart && currentPos) {
             ctx.strokeStyle = 'rgba(96, 165, 250, 0.7)';
@@ -809,6 +912,36 @@ const Board = () => {
     const handleMouseMove = (e: React.MouseEvent) => {
         const { x, y } = getCanvasCoords(e);
 
+        if (isDrawing && arrowHandle && selectedElements.length === 1) {
+            const el = elements.find(e => e.id === selectedElements[0]);
+            if (el && el.type === 'arrow') {
+                const newElements = elements.map(e => {
+                    if (e.id === el.id) {
+                        if (arrowHandle.type === 'control') {
+                            return { ...e, controlPoint: { x, y } };
+                        } else if (arrowHandle.type === 'start') {
+                            const connection = getConnectionPointAtPosition(x, y);
+                            if (connection) {
+                                return { ...e, startPoint: undefined, fromId: connection.element.id, fromPoint: connection.point };
+                            } else {
+                                return { ...e, startPoint: { x, y }, fromId: undefined, fromPoint: undefined };
+                            }
+                        } else if (arrowHandle.type === 'end') {
+                            const connection = getConnectionPointAtPosition(x, y);
+                            if (connection) {
+                                return { ...e, endPoint: undefined, toId: connection.element.id, toPoint: connection.point };
+                            } else {
+                                return { ...e, endPoint: { x, y }, toId: undefined, toPoint: undefined };
+                            }
+                        }
+                    }
+                    return e;
+                });
+                setElements(newElements);
+                return;
+            }
+        }
+
         if (isDrawing && resizeHandle && selectedElements.length === 1) {
             const el = elements.find(e => e.id === selectedElements[0]);
             if (el) {
@@ -929,16 +1062,29 @@ const Board = () => {
 
         if (selectedElements.length === 1) {
             const el = elements.find(e => e.id === selectedElements[0]);
-            if (el && (el.type === 'rect' || el.type === 'circle' || el.type === 'image')) {
-                const handles = getResizeHandles(el);
-                const clickedHandle = handles.find(h => {
-                    return x >= h.x - 5 && x <= h.x + 5 && y >= h.y - 5 && y <= h.y + 5;
-                });
-                if (clickedHandle) {
-                    setResizeHandle(clickedHandle.type);
-                    setIsDrawing(true);
-                    setStartPos({ x, y });
-                    return;
+            if (el) {
+                if (el.type === 'rect' || el.type === 'circle' || el.type === 'image') {
+                    const handles = getResizeHandles(el);
+                    const clickedHandle = handles.find(h => {
+                        return x >= h.x - 5 && x <= h.x + 5 && y >= h.y - 5 && y <= h.y + 5;
+                    });
+                    if (clickedHandle) {
+                        setResizeHandle(clickedHandle.type);
+                        setIsDrawing(true);
+                        setStartPos({ x, y });
+                        return;
+                    }
+                } else if (el.type === 'arrow') {
+                    const handles = getArrowHandles(el);
+                    const clickedHandle = handles.find(h => {
+                        return x >= h.x - 5 && x <= h.x + 5 && y >= h.y - 5 && y <= h.y + 5;
+                    });
+                    if (clickedHandle) {
+                        setArrowHandle(clickedHandle);
+                        setIsDrawing(true);
+                        setStartPos({ x, y });
+                        return;
+                    }
                 }
             }
         }
@@ -1041,8 +1187,9 @@ const Board = () => {
     };
 
     const stopDrawing = async () => {
-        if (resizeHandle) {
+        if (resizeHandle || arrowHandle) {
             setResizeHandle(null);
+            setArrowHandle(null);
             setIsDrawing(false);
             addToHistory(elements);
             emitElements(elements);
