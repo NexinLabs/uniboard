@@ -2,6 +2,7 @@ import { useContext, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import axios from 'axios';
+import { io, Socket } from 'socket.io-client';
 import {
     Square, Circle, Type, Image as ImageIcon, Trash2, MousePointer,
     ArrowRight, Copy, Clipboard, Palette, Undo, Redo, Hand
@@ -37,6 +38,7 @@ const Board = () => {
     const { user } = useContext(AuthContext);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const saveTimeoutRef = useRef<number | null>(null);
+    const socketRef = useRef<Socket | null>(null);
 
     const [tool, setTool] = useState<Tool>('select');
     const [isDrawing, setIsDrawing] = useState(false);
@@ -76,31 +78,58 @@ const Board = () => {
         };
         fetchBoard();
 
+        // Setup Socket.IO connection
+        if (!socketRef.current && id) {
+            console.log('Connecting to Socket.IO...');
+            socketRef.current = io('http://localhost:5000');
+
+            // Join the board room
+            socketRef.current.emit('join-board', id);
+            console.log('Joined board room:', id);
+
+            // Listen for updates from other users
+            socketRef.current.on('elements-updated', (updatedElements: Element[]) => {
+                console.log('📡 Received elements update from another user');
+                setElements(updatedElements);
+                addToHistory(updatedElements);
+            });
+
+            socketRef.current.on('user-joined', (data: any) => {
+                console.log('👋 User joined:', data.userId);
+            });
+
+            socketRef.current.on('user-left', (data: any) => {
+                console.log('👋 User left:', data.userId);
+            });
+        }
+
         return () => {
             if (saveTimeoutRef.current) {
                 clearTimeout(saveTimeoutRef.current);
             }
+            if (socketRef.current) {
+                console.log('Disconnecting from Socket.IO...');
+                socketRef.current.emit('leave-board', id);
+                socketRef.current.disconnect();
+                socketRef.current = null;
+            }
         };
     }, [id, user]);
 
-    const saveElements = async (elementsToSave: Element[]) => {
-        if (!user) return;
-        try {
-            await axios.put(`http://localhost:5000/api/boards/${id}`, { elements: elementsToSave }, {
-                headers: { token: "Bearer " + user.token },
-            });
-        } catch (err) {
-            console.log(err);
-        }
-    };
+    // REMOVED: No longer needed - server handles DB saves via Socket.IO
+    // const saveElements = async (elementsToSave: Element[]) => { ... }
 
-    const debouncedSave = (elementsToSave: Element[]) => {
-        if (saveTimeoutRef.current) {
-            clearTimeout(saveTimeoutRef.current);
+    // Emit changes via Socket.IO ONLY - server handles DB save
+    const emitElements = (elementsToSave: Element[]) => {
+        if (socketRef.current && id) {
+            console.log('📤 Emitting elements via Socket.IO (server will save to DB)');
+            socketRef.current.emit('element-update', {
+                boardId: id,
+                elements: elementsToSave
+            });
+        } else {
+            console.warn('⚠️ Socket not connected, changes not synced!');
         }
-        saveTimeoutRef.current = setTimeout(() => {
-            saveElements(elementsToSave);
-        }, 1000);
     };
 
     const addToHistory = (newElements: Element[]) => {
@@ -115,7 +144,7 @@ const Board = () => {
             const newIndex = historyIndex - 1;
             setHistoryIndex(newIndex);
             setElements(history[newIndex]);
-            saveElements(history[newIndex]);
+            emitElements(history[newIndex]);
         }
     };
 
@@ -124,7 +153,7 @@ const Board = () => {
             const newIndex = historyIndex + 1;
             setHistoryIndex(newIndex);
             setElements(history[newIndex]);
-            saveElements(history[newIndex]);
+            emitElements(history[newIndex]);
         }
     };
 
@@ -460,7 +489,7 @@ const Board = () => {
                 const newElements = [...elements, newElement];
                 setElements(newElements);
                 addToHistory(newElements);
-                saveElements(newElements);
+                emitElements(newElements);
                 setArrowStart(null);
                 setCurrentPos(null);
                 setTool('select');
@@ -505,7 +534,7 @@ const Board = () => {
                 const newElements = [...elements, newElement];
                 setElements(newElements);
                 addToHistory(newElements);
-                saveElements(newElements);
+                emitElements(newElements);
                 setTool('select');
             }
         } else {
@@ -527,7 +556,7 @@ const Board = () => {
 
         if (tool === 'select' && selectedElements.length > 0) {
             addToHistory(elements);
-            await saveElements(elements);
+            emitElements(elements);
             setDragOffset(null);
             return;
         }
@@ -569,7 +598,7 @@ const Board = () => {
             const newElements = [...elements, newElement];
             setElements(newElements);
             addToHistory(newElements);
-            await saveElements(newElements);
+            emitElements(newElements);
             setTool('select');
         }
 
@@ -590,7 +619,7 @@ const Board = () => {
         setSelectedElements([]);
         setShowPropertiesPanel(false);
         addToHistory(newElements);
-        await saveElements(newElements);
+        emitElements(newElements);
         setTool('select');
     };
 
@@ -616,7 +645,7 @@ const Board = () => {
         setElements(allElements);
         setSelectedElements(newElements.map(el => el.id));
         addToHistory(allElements);
-        await saveElements(allElements);
+        emitElements(allElements);
     };
 
     const handleImageUpload = () => {
@@ -640,7 +669,7 @@ const Board = () => {
                     const newElements = [...elements, newElement];
                     setElements(newElements);
                     addToHistory(newElements);
-                    saveElements(newElements);
+                    emitElements(newElements);
                     setTool('select');
                 };
                 reader.readAsDataURL(file);
@@ -659,7 +688,7 @@ const Board = () => {
         });
         setElements(newElements);
         addToHistory(newElements);
-        debouncedSave(newElements);
+        emitElements(newElements);
     };
 
     useEffect(() => {
