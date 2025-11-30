@@ -147,6 +147,7 @@ const Board = () => {
     const [arrowHandle, setArrowHandle] = useState<{ type: 'start' | 'end' | 'control', x: number, y: number } | null>(null);
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, elementId: string } | null>(null);
     const [showLayers, setShowLayers] = useState(false);
+    const [draggedLayerIndex, setDraggedLayerIndex] = useState<number | null>(null);
 
     const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState(false);
@@ -1386,15 +1387,32 @@ const Board = () => {
         emitElements(allElements);
     };
 
+    const uploadImage = async (file: File): Promise<string | null> => {
+        const formData = new FormData();
+        formData.append('image', file);
+
+        try {
+            const res = await axios.post('http://localhost:5000/api/upload', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
+            });
+            return res.data.url;
+        } catch (err) {
+            console.error('Error uploading image:', err);
+            return null;
+        }
+    };
+
     const handleImageUpload = () => {
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
-        input.onchange = (e: any) => {
+        input.onchange = async (e: any) => {
             const file = e.target.files[0];
             if (file) {
-                const reader = new FileReader();
-                reader.onload = (event) => {
+                const imageUrl = await uploadImage(file);
+                if (imageUrl) {
                     const newElement: Element = {
                         id: Date.now().toString(),
                         type: 'image',
@@ -1402,15 +1420,14 @@ const Board = () => {
                         y: 100,
                         w: 200,
                         h: 200,
-                        imageUrl: event.target?.result as string
+                        imageUrl: imageUrl
                     };
                     const newElements = [...elements, newElement];
                     setElements(newElements);
                     addToHistory(newElements);
                     emitElements(newElements);
                     setTool('select');
-                };
-                reader.readAsDataURL(file);
+                }
             }
         };
         input.click();
@@ -1500,6 +1517,61 @@ const Board = () => {
             case 'arrow': return <ArrowRight size={14} />;
             default: return <Square size={14} />;
         }
+    };
+
+    const handleCanvasDrop = async (e: React.DragEvent) => {
+        e.preventDefault();
+        const file = e.dataTransfer.files[0];
+        if (file && file.type.startsWith('image/')) {
+            const { x, y } = getCanvasCoords(e as unknown as React.MouseEvent);
+            const imageUrl = await uploadImage(file);
+            
+            if (imageUrl) {
+                const newElement: Element = {
+                    id: Date.now().toString(),
+                    type: 'image',
+                    x: x - 100,
+                    y: y - 100,
+                    w: 200,
+                    h: 200,
+                    imageUrl: imageUrl
+                };
+                const newElements = [...elements, newElement];
+                setElements(newElements);
+                addToHistory(newElements);
+                emitElements(newElements);
+            }
+        }
+    };
+
+    const handleWheel = (e: React.WheelEvent) => {
+        if (e.ctrlKey) return;
+        setPanOffset(prev => ({
+            ...prev,
+            y: prev.y - e.deltaY
+        }));
+    };
+
+    const handleLayerDragStart = (e: React.DragEvent, index: number) => {
+        setDraggedLayerIndex(index);
+    };
+
+    const handleLayerDrop = (e: React.DragEvent, targetIndex: number) => {
+        e.preventDefault();
+        if (draggedLayerIndex === null) return;
+        if (draggedLayerIndex === targetIndex) return;
+
+        const realSourceIndex = elements.length - 1 - draggedLayerIndex;
+        const realTargetIndex = elements.length - 1 - targetIndex;
+        
+        const newElements = [...elements];
+        const [movedElement] = newElements.splice(realSourceIndex, 1);
+        newElements.splice(realTargetIndex, 0, movedElement);
+        
+        setElements(newElements);
+        addToHistory(newElements);
+        emitElements(newElements);
+        setDraggedLayerIndex(null);
     };
 
     const handlersRef = useRef({
@@ -1627,10 +1699,6 @@ const Board = () => {
                         <Plus size={20} />
                         <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Insert (I)</span>
                     </button>
-                    <button className="p-2 rounded hover:bg-secondary text-muted-foreground hover:text-foreground relative group">
-                        <Sparkles size={20} />
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">AI (Ctrl+J)</span>
-                    </button>
                 </div>
 
                 {/* Main Tools Group */}
@@ -1707,18 +1775,6 @@ const Board = () => {
                         <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Image</span>
                     </button>
                 </div>
-
-                {/* Bottom Group */}
-                <div className="bg-card border border-border rounded-lg p-1 flex flex-col gap-1 shadow-lg">
-                    <button 
-                        onClick={() => setTool('frame')}
-                        className={`p-2 rounded relative group ${tool === 'frame' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <Frame size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">F</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Frame</span>
-                    </button>
-                </div>
             </div>
 
             <div className="flex-1 relative">
@@ -1749,6 +1805,10 @@ const Board = () => {
                             {elements.slice().reverse().map((el, i) => (
                                 <div 
                                     key={el.id}
+                                    draggable
+                                    onDragStart={(e) => handleLayerDragStart(e, i)}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={(e) => handleLayerDrop(e, i)}
                                     className={`p-2 rounded text-xs flex items-center gap-2 cursor-pointer group ${selectedElements.includes(el.id) ? 'bg-primary/20 text-primary' : 'hover:bg-secondary'}`}
                                     onClick={() => setSelectedElements([el.id])}
                                 >
@@ -1785,6 +1845,9 @@ const Board = () => {
                     onMouseLeave={stopDrawing}
                     onDoubleClick={handleDoubleClick}
                     onContextMenu={handleContextMenu}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={handleCanvasDrop}
+                    onWheel={handleWheel}
                 />
 
                 {editingElementId && (() => {
