@@ -29,6 +29,91 @@ export function drawRoundedRect(
 }
 
 /**
+ * Draw a triangle path
+ */
+export function drawTriangle(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number
+): void {
+    ctx.beginPath();
+    ctx.moveTo(x + w / 2, y);
+    ctx.lineTo(x + w, y + h);
+    ctx.lineTo(x, y + h);
+    ctx.closePath();
+}
+
+/**
+ * Draw a diamond path
+ */
+export function drawDiamond(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number
+): void {
+    ctx.beginPath();
+    ctx.moveTo(x + w / 2, y);
+    ctx.lineTo(x + w, y + h / 2);
+    ctx.lineTo(x + w / 2, y + h);
+    ctx.lineTo(x, y + h / 2);
+    ctx.closePath();
+}
+
+/**
+ * Draw a hexagon path
+ */
+export function drawHexagon(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number
+): void {
+    const sideX = w / 4;
+    const sideY = h / 2;
+    ctx.beginPath();
+    ctx.moveTo(x + sideX, y);
+    ctx.lineTo(x + w - sideX, y);
+    ctx.lineTo(x + w, y + sideY);
+    ctx.lineTo(x + w - sideX, y + h);
+    ctx.lineTo(x + sideX, y + h);
+    ctx.lineTo(x, y + sideY);
+    ctx.closePath();
+}
+
+/**
+ * Draw a star path
+ */
+export function drawStar(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    points: number = 5
+): void {
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const outerRadius = Math.min(w, h) / 2;
+    const innerRadius = outerRadius / 2;
+
+    ctx.beginPath();
+    for (let i = 0; i < points * 2; i++) {
+        const radius = i % 2 === 0 ? outerRadius : innerRadius;
+        const angle = (i * Math.PI) / points - Math.PI / 2;
+        const px = cx + Math.cos(angle) * radius;
+        const py = cy + Math.sin(angle) * radius;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+}
+
+/**
  * Draw a rounded path through multiple points
  */
 export function drawRoundedPath(

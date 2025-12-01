@@ -8,7 +8,7 @@ import { getArrowPoints } from './arrows';
  * Get resize handles for an element
  */
 export function getResizeHandles(el: Element): ResizeHandlePosition[] {
-    if (el.type === 'rect' || el.type === 'image') {
+    if (el.type === 'rect' || el.type === 'image' || el.type === 'triangle' || el.type === 'diamond' || el.type === 'hexagon' || el.type === 'star') {
         const x = el.x;
         const y = el.y;
         const w = el.w || 0;
@@ -69,7 +69,7 @@ export function getElementAtPosition(
         const el = elements[i];
         if (el.isHidden) continue;
 
-        if (el.type === 'rect' || el.type === 'image') {
+        if (el.type === 'rect' || el.type === 'image' || el.type === 'triangle' || el.type === 'diamond' || el.type === 'hexagon' || el.type === 'star') {
             const elX = el.x;
             const elY = el.y;
             const elW = el.w || 0;
@@ -183,7 +183,7 @@ export function getElementsInSelectionBox(
 
     return elements
         .filter(el => {
-            if (el.type === 'rect' || el.type === 'image') {
+            if (el.type === 'rect' || el.type === 'image' || el.type === 'triangle' || el.type === 'diamond' || el.type === 'hexagon' || el.type === 'star') {
                 const elX = el.x;
                 const elY = el.y;
                 const elW = el.w || 0;
@@ -203,22 +203,28 @@ export function getElementsInSelectionBox(
 /**
  * Change the shape of selected elements
  */
-export function changeElementShape(elements: Element[], selectedIds: string[], newType: 'rect' | 'circle'): Element[] {
+export function changeElementShape(elements: Element[], selectedIds: string[], newType: 'rect' | 'circle' | 'triangle' | 'diamond' | 'hexagon' | 'star'): Element[] {
     return elements.map(el => {
         if (selectedIds.includes(el.id)) {
             if (el.type === newType) return el;
             const updates: Partial<Element> = { type: newType };
-            if (newType === 'circle' && el.type === 'rect') {
+            if (newType === 'circle' && (el.type === 'rect' || el.type === 'triangle' || el.type === 'diamond' || el.type === 'hexagon' || el.type === 'star')) {
                 const size = Math.min(el.w || 50, el.h || 50);
                 updates.radius = size / 2;
                 updates.x = el.x + (el.w || 0) / 2;
                 updates.y = el.y + (el.h || 0) / 2;
-            } else if (newType === 'rect' && el.type === 'circle') {
+                updates.w = undefined;
+                updates.h = undefined;
+            } else if ((newType === 'rect' || newType === 'triangle' || newType === 'diamond' || newType === 'hexagon' || newType === 'star') && el.type === 'circle') {
                 const r = el.radius || 25;
                 updates.w = r * 2;
                 updates.h = r * 2;
                 updates.x = el.x - r;
                 updates.y = el.y - r;
+                updates.radius = undefined;
+            } else if (el.type !== 'circle' && newType !== 'circle') {
+                // Converting between rect-like shapes, just keep w/h
+                updates.type = newType;
             }
             return { ...el, ...updates };
         }

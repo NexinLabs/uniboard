@@ -1,6 +1,6 @@
 // Type definitions for the Board component
 
-export type Tool = 'select' | 'rect' | 'circle' | 'text' | 'arrow' | 'image' | 'line' | 'frame' | 'pan';
+export type Tool = 'select' | 'rect' | 'circle' | 'triangle' | 'diamond' | 'hexagon' | 'star' | 'text' | 'arrow' | 'image' | 'line' | 'frame' | 'pan';
 
 export interface ConnectionPoint {
     x: number;
@@ -10,7 +10,7 @@ export interface ConnectionPoint {
 
 export interface Element {
     id: string;
-    type: 'rect' | 'circle' | 'text' | 'image' | 'arrow';
+    type: 'rect' | 'circle' | 'triangle' | 'diamond' | 'hexagon' | 'star' | 'text' | 'image' | 'arrow';
     x: number;
     y: number;
     w?: number;

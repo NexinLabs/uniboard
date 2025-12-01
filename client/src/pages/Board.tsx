@@ -13,7 +13,8 @@ import {
     Search, AlignLeft, AlignCenter, AlignRight,
     Layers, Eye, EyeOff, Copy, Scissors, Clipboard,
     BringToFront, Download,
-    Share2, Menu, User, LayoutDashboard, LogOut, X, Globe, Lock, Image, MoreVertical
+    Share2, Menu, User, LayoutDashboard, LogOut, X, Globe, Lock, Image, MoreVertical,
+    Triangle, Diamond, Hexagon, Star
 } from 'lucide-react';
 
 // Import types and utilities from modular board utilities
@@ -51,6 +52,10 @@ import {
 
     // Canvas utilities
     drawRoundedRect,
+    drawTriangle,
+    drawDiamond,
+    drawHexagon,
+    drawStar,
     drawArrow,
     drawConnectionPoints,
     drawText,
@@ -295,6 +300,129 @@ const Board = () => {
                 if (tool === 'arrow' || isSelected) {
                     drawConnectionPoints(ctx, el, hoveredConnectionPoint);
                 }
+                if (tool === 'arrow' || isSelected) {
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
+                }
+            } else if (el.type === 'triangle') {
+                ctx.globalAlpha = el.opacity || 1;
+                if (el.backgroundColor) {
+                    ctx.fillStyle = el.backgroundColor;
+                    drawTriangle(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                    ctx.fill();
+                }
+                ctx.strokeStyle = el.color || 'white';
+                ctx.lineWidth = (el.strokeWidth || 2) + (isSelected ? 1 : 0);
+                drawTriangle(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+
+                if (el.text && el.id !== editingElementId) {
+                    ctx.fillStyle = el.textColor || el.color || 'white';
+                    const fontSize = el.fontSize || 16;
+                    ctx.font = `${fontSize}px ${el.fontFamily || 'Arial'}`;
+                    ctx.textAlign = el.textAlign || 'center';
+                    ctx.textBaseline = 'middle';
+
+                    let textX = el.x + (el.w || 0) / 2;
+                    if (el.textAlign === 'left') textX = el.x + 10;
+                    if (el.textAlign === 'right') textX = el.x + (el.w || 0) - 10;
+
+                    drawText(ctx, el.text, textX, el.y + (el.h || 0) / 2, (el.w || 0) - 20, fontSize, el.textAlign || 'center', el.textWrap || false);
+                }
+
+                if (tool === 'arrow' || isSelected) {
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
+                }
+            } else if (el.type === 'diamond') {
+                ctx.globalAlpha = el.opacity || 1;
+                if (el.backgroundColor) {
+                    ctx.fillStyle = el.backgroundColor;
+                    drawDiamond(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                    ctx.fill();
+                }
+                ctx.strokeStyle = el.color || 'white';
+                ctx.lineWidth = (el.strokeWidth || 2) + (isSelected ? 1 : 0);
+                drawDiamond(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+
+                if (el.text && el.id !== editingElementId) {
+                    ctx.fillStyle = el.textColor || el.color || 'white';
+                    const fontSize = el.fontSize || 16;
+                    ctx.font = `${fontSize}px ${el.fontFamily || 'Arial'}`;
+                    ctx.textAlign = el.textAlign || 'center';
+                    ctx.textBaseline = 'middle';
+
+                    let textX = el.x + (el.w || 0) / 2;
+                    if (el.textAlign === 'left') textX = el.x + 10;
+                    if (el.textAlign === 'right') textX = el.x + (el.w || 0) - 10;
+
+                    drawText(ctx, el.text, textX, el.y + (el.h || 0) / 2, (el.w || 0) - 20, fontSize, el.textAlign || 'center', el.textWrap || false);
+                }
+
+                if (tool === 'arrow' || isSelected) {
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
+                }
+            } else if (el.type === 'hexagon') {
+                ctx.globalAlpha = el.opacity || 1;
+                if (el.backgroundColor) {
+                    ctx.fillStyle = el.backgroundColor;
+                    drawHexagon(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                    ctx.fill();
+                }
+                ctx.strokeStyle = el.color || 'white';
+                ctx.lineWidth = (el.strokeWidth || 2) + (isSelected ? 1 : 0);
+                drawHexagon(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+
+                if (el.text && el.id !== editingElementId) {
+                    ctx.fillStyle = el.textColor || el.color || 'white';
+                    const fontSize = el.fontSize || 16;
+                    ctx.font = `${fontSize}px ${el.fontFamily || 'Arial'}`;
+                    ctx.textAlign = el.textAlign || 'center';
+                    ctx.textBaseline = 'middle';
+
+                    let textX = el.x + (el.w || 0) / 2;
+                    if (el.textAlign === 'left') textX = el.x + 10;
+                    if (el.textAlign === 'right') textX = el.x + (el.w || 0) - 10;
+
+                    drawText(ctx, el.text, textX, el.y + (el.h || 0) / 2, (el.w || 0) - 20, fontSize, el.textAlign || 'center', el.textWrap || false);
+                }
+
+                if (tool === 'arrow' || isSelected) {
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
+                }
+            } else if (el.type === 'star') {
+                ctx.globalAlpha = el.opacity || 1;
+                if (el.backgroundColor) {
+                    ctx.fillStyle = el.backgroundColor;
+                    drawStar(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                    ctx.fill();
+                }
+                ctx.strokeStyle = el.color || 'white';
+                ctx.lineWidth = (el.strokeWidth || 2) + (isSelected ? 1 : 0);
+                drawStar(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+
+                if (el.text && el.id !== editingElementId) {
+                    ctx.fillStyle = el.textColor || el.color || 'white';
+                    const fontSize = el.fontSize || 16;
+                    ctx.font = `${fontSize}px ${el.fontFamily || 'Arial'}`;
+                    ctx.textAlign = el.textAlign || 'center';
+                    ctx.textBaseline = 'middle';
+
+                    let textX = el.x + (el.w || 0) / 2;
+                    if (el.textAlign === 'left') textX = el.x + 10;
+                    if (el.textAlign === 'right') textX = el.x + (el.w || 0) - 10;
+
+                    drawText(ctx, el.text, textX, el.y + (el.h || 0) / 2, (el.w || 0) - 20, fontSize, el.textAlign || 'center', el.textWrap || false);
+                }
+
+                if (tool === 'arrow' || isSelected) {
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
+                }
             } else if (el.type === 'circle') {
                 ctx.globalAlpha = el.opacity || 1;
                 if (el.backgroundColor) {
@@ -381,7 +509,9 @@ const Board = () => {
 
             ctx.globalAlpha = 1;
 
-            if (isSelected && (el.type === 'rect' || el.type === 'circle' || el.type === 'image')) {
+            ctx.globalAlpha = 1;
+
+            if (isSelected && (el.type === 'rect' || el.type === 'circle' || el.type === 'image' || el.type === 'triangle' || el.type === 'diamond' || el.type === 'hexagon' || el.type === 'star')) {
                 const handles = getResizeHandles(el);
                 handles.forEach(handle => {
                     ctx.fillStyle = 'white';
@@ -448,6 +578,26 @@ const Board = () => {
                 const h = currentPos.y - startPos.y;
                 drawRoundedRect(ctx, startPos.x, startPos.y, w, h, 8);
                 ctx.stroke();
+            } else if (tool === 'triangle') {
+                const w = currentPos.x - startPos.x;
+                const h = currentPos.y - startPos.y;
+                drawTriangle(ctx, startPos.x, startPos.y, w, h);
+                ctx.stroke();
+            } else if (tool === 'diamond') {
+                const w = currentPos.x - startPos.x;
+                const h = currentPos.y - startPos.y;
+                drawDiamond(ctx, startPos.x, startPos.y, w, h);
+                ctx.stroke();
+            } else if (tool === 'hexagon') {
+                const w = currentPos.x - startPos.x;
+                const h = currentPos.y - startPos.y;
+                drawHexagon(ctx, startPos.x, startPos.y, w, h);
+                ctx.stroke();
+            } else if (tool === 'star') {
+                const w = currentPos.x - startPos.x;
+                const h = currentPos.y - startPos.y;
+                drawStar(ctx, startPos.x, startPos.y, w, h);
+                ctx.stroke();
             } else if (tool === 'circle') {
                 const radius = Math.sqrt(
                     Math.pow(currentPos.x - startPos.x, 2) +
@@ -466,7 +616,7 @@ const Board = () => {
     const handleDoubleClick = (e: React.MouseEvent) => {
         const { x, y } = getCanvasCoords(e);
         const element = getElementAtPos(x, y, elements);
-        if (element && (element.type === 'rect' || element.type === 'circle')) {
+        if (element && (element.type === 'rect' || element.type === 'circle' || element.type === 'triangle' || element.type === 'diamond' || element.type === 'hexagon' || element.type === 'star')) {
             setEditingElementId(element.id);
             setTool('select');
         }
@@ -644,7 +794,7 @@ const Board = () => {
         if (selectedElements.length === 1) {
             const el = elements.find(e => e.id === selectedElements[0]);
             if (el) {
-                if (el.type === 'rect' || el.type === 'circle' || el.type === 'image') {
+                if (el.type === 'rect' || el.type === 'circle' || el.type === 'image' || el.type === 'triangle' || el.type === 'diamond' || el.type === 'hexagon' || el.type === 'star') {
                     const handles = getResizeHandles(el);
                     const clickedHandle = handles.find(h => {
                         return x >= h.x - 5 && x <= h.x + 5 && y >= h.y - 5 && y <= h.y + 5;
@@ -790,7 +940,7 @@ const Board = () => {
             const h = Math.abs(selectionBox.current.y - selectionBox.start.y);
 
             const selected = elements.filter(el => {
-                if (el.type === 'rect' || el.type === 'image') {
+                if (el.type === 'rect' || el.type === 'image' || el.type === 'triangle' || el.type === 'diamond' || el.type === 'hexagon' || el.type === 'star') {
                     return el.x >= x && el.x + (el.w || 0) <= x + w &&
                         el.y >= y && el.y + (el.h || 0) <= y + h;
                 } else if (el.type === 'circle') {
@@ -996,7 +1146,7 @@ const Board = () => {
         updateSelectedElements({ color });
     };
 
-    const changeShape = (newType: 'rect' | 'circle') => {
+    const changeShape = (newType: 'rect' | 'circle' | 'triangle' | 'diamond' | 'hexagon' | 'star') => {
         if (isReadOnly()) return;
         if (selectedElements.length === 0) return;
         const newElements = changeElementShape(elements, selectedElements, newType);
@@ -1026,6 +1176,10 @@ const Board = () => {
         switch (type) {
             case 'rect': return <Square size={14} />;
             case 'circle': return <Circle size={14} />;
+            case 'triangle': return <Triangle size={14} />;
+            case 'diamond': return <Diamond size={14} />;
+            case 'hexagon': return <Hexagon size={14} />;
+            case 'star': return <Star size={14} />;
             case 'text': return <Type size={14} />;
             case 'image': return <Search size={14} />;
             case 'arrow': return <ArrowRight size={14} />;
@@ -1333,20 +1487,26 @@ const Board = () => {
                         <MousePointer2 size={20} />
                         <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Select (V)</span>
                     </button>
-                    <button
-                        onClick={() => setTool('rect')}
-                        className={`p-2 rounded relative group ${tool === 'rect' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <Square size={20} />
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Rectangle (R)</span>
-                    </button>
-                    <button
-                        onClick={() => setTool('circle')}
-                        className={`p-2 rounded relative group ${tool === 'circle' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <Circle size={20} />
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Circle (O)</span>
-                    </button>
+                    <div className="relative group">
+                        <button
+                            className={`p-2 rounded ${['rect', 'circle', 'triangle', 'diamond', 'hexagon', 'star'].includes(tool) ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                        >
+                            {tool === 'circle' ? <Circle size={20} /> :
+                                tool === 'triangle' ? <Triangle size={20} /> :
+                                    tool === 'diamond' ? <Diamond size={20} /> :
+                                        tool === 'hexagon' ? <Hexagon size={20} /> :
+                                            tool === 'star' ? <Star size={20} /> :
+                                                <Square size={20} />}
+                        </button>
+                        <div className="absolute left-full top-0 ml-2 bg-card border border-border rounded-lg shadow-lg p-2 grid grid-cols-2 gap-2 w-32 hidden group-hover:grid z-50">
+                            <button onClick={() => setTool('rect')} className={`p-2 rounded hover:bg-secondary flex justify-center ${tool === 'rect' ? 'bg-primary/20 text-primary' : ''}`} title="Rectangle"><Square size={20} /></button>
+                            <button onClick={() => setTool('circle')} className={`p-2 rounded hover:bg-secondary flex justify-center ${tool === 'circle' ? 'bg-primary/20 text-primary' : ''}`} title="Circle"><Circle size={20} /></button>
+                            <button onClick={() => setTool('triangle')} className={`p-2 rounded hover:bg-secondary flex justify-center ${tool === 'triangle' ? 'bg-primary/20 text-primary' : ''}`} title="Triangle"><Triangle size={20} /></button>
+                            <button onClick={() => setTool('diamond')} className={`p-2 rounded hover:bg-secondary flex justify-center ${tool === 'diamond' ? 'bg-primary/20 text-primary' : ''}`} title="Diamond"><Diamond size={20} /></button>
+                            <button onClick={() => setTool('hexagon')} className={`p-2 rounded hover:bg-secondary flex justify-center ${tool === 'hexagon' ? 'bg-primary/20 text-primary' : ''}`} title="Hexagon"><Hexagon size={20} /></button>
+                            <button onClick={() => setTool('star')} className={`p-2 rounded hover:bg-secondary flex justify-center ${tool === 'star' ? 'bg-primary/20 text-primary' : ''}`} title="Star"><Star size={20} /></button>
+                        </div>
+                    </div>
                     <button
                         onClick={() => setTool('arrow')}
                         className={`p-2 rounded relative group ${tool === 'arrow' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
@@ -1665,48 +1825,53 @@ const Board = () => {
                         </div>
 
                         {/* Background Color Picker (for shapes) */}
-                        {(elements.find(el => el.id === selectedElements[0])?.type === 'rect' || elements.find(el => el.id === selectedElements[0])?.type === 'circle') && (
-                            <div className="relative group">
-                                <button
-                                    className="p-2 hover:bg-secondary rounded border border-border"
-                                    title="Background Color"
-                                >
-                                    <div
-                                        className="w-4 h-4 rounded-sm border border-gray-500"
-                                        style={{ backgroundColor: elements.find(el => el.id === selectedElements[0])?.backgroundColor || 'transparent' }}
-                                    />
-                                </button>
-                                <div className="absolute bottom-full left-0 mb-0 hidden group-hover:block bg-card p-2 rounded border border-border shadow-lg flex flex-col gap-2">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs">Fill:</span>
-                                        <input
-                                            type="color"
-                                            defaultValue={elements.find(el => el.id === selectedElements[0])?.backgroundColor || '#ffffff'}
-                                            onBlur={(e) => updateSelectedElements({ backgroundColor: e.target.value })}
-                                            className="w-24 h-6 cursor-pointer"
+                        {(elements.find(el => el.id === selectedElements[0])?.type === 'rect' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'circle' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'triangle' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'diamond' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'hexagon' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'star') && (
+                                <div className="relative group">
+                                    <button
+                                        className="p-2 hover:bg-secondary rounded border border-border"
+                                        title="Background Color"
+                                    >
+                                        <div
+                                            className="w-4 h-4 rounded-sm border border-gray-500"
+                                            style={{ backgroundColor: elements.find(el => el.id === selectedElements[0])?.backgroundColor || 'transparent' }}
                                         />
-                                        <button
-                                            onClick={() => updateSelectedElements({ backgroundColor: undefined })}
-                                            className="text-xs text-red-500 hover:underline"
-                                        >
-                                            Clear
-                                        </button>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs">Opacity:</span>
-                                        <input
-                                            type="range"
-                                            min="0.1"
-                                            max="1"
-                                            step="0.1"
-                                            defaultValue={elements.find(el => el.id === selectedElements[0])?.opacity || 1}
-                                            onMouseUp={(e) => updateSelectedElements({ opacity: parseFloat((e.target as HTMLInputElement).value) })}
-                                            className="w-24"
-                                        />
+                                    </button>
+                                    <div className="absolute bottom-full left-0 mb-0 hidden group-hover:block bg-card p-2 rounded border border-border shadow-lg flex flex-col gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs">Fill:</span>
+                                            <input
+                                                type="color"
+                                                defaultValue={elements.find(el => el.id === selectedElements[0])?.backgroundColor || '#ffffff'}
+                                                onBlur={(e) => updateSelectedElements({ backgroundColor: e.target.value })}
+                                                className="w-24 h-6 cursor-pointer"
+                                            />
+                                            <button
+                                                onClick={() => updateSelectedElements({ backgroundColor: undefined })}
+                                                className="text-xs text-red-500 hover:underline"
+                                            >
+                                                Clear
+                                            </button>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs">Opacity:</span>
+                                            <input
+                                                type="range"
+                                                min="0.1"
+                                                max="1"
+                                                step="0.1"
+                                                defaultValue={elements.find(el => el.id === selectedElements[0])?.opacity || 1}
+                                                onMouseUp={(e) => updateSelectedElements({ opacity: parseFloat((e.target as HTMLInputElement).value) })}
+                                                className="w-24"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        )}
+                            )}
 
                         <div className="w-px h-6 bg-border mx-1" />
 
@@ -1800,40 +1965,73 @@ const Board = () => {
                         )}
 
                         {/* Shape Options */}
-                        {(elements.find(el => el.id === selectedElements[0])?.type === 'rect' || elements.find(el => el.id === selectedElements[0])?.type === 'circle') && (
-                            <>
-                                <div className="flex bg-secondary/50 rounded p-1 gap-1">
-                                    <button
-                                        onClick={() => changeShape('rect')}
-                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'rect' ? 'bg-primary text-primary-foreground' : ''}`}
-                                        title="Rectangle"
-                                    >
-                                        <Square size={16} />
-                                    </button>
-                                    <button
-                                        onClick={() => changeShape('circle')}
-                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'circle' ? 'bg-primary text-primary-foreground' : ''}`}
-                                        title="Circle"
-                                    >
-                                        <Circle size={16} />
-                                    </button>
-                                </div>
+                        {(elements.find(el => el.id === selectedElements[0])?.type === 'rect' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'circle' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'triangle' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'diamond' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'hexagon' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'star') && (
+                                <>
+                                    <div className="flex bg-secondary/50 rounded p-1 gap-1">
+                                        <button
+                                            onClick={() => changeShape('rect')}
+                                            className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'rect' ? 'bg-primary text-primary-foreground' : ''}`}
+                                            title="Rectangle"
+                                        >
+                                            <Square size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => changeShape('circle')}
+                                            className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'circle' ? 'bg-primary text-primary-foreground' : ''}`}
+                                            title="Circle"
+                                        >
+                                            <Circle size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => changeShape('triangle')}
+                                            className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'triangle' ? 'bg-primary text-primary-foreground' : ''}`}
+                                            title="Triangle"
+                                        >
+                                            <Triangle size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => changeShape('diamond')}
+                                            className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'diamond' ? 'bg-primary text-primary-foreground' : ''}`}
+                                            title="Diamond"
+                                        >
+                                            <Diamond size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => changeShape('hexagon')}
+                                            className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'hexagon' ? 'bg-primary text-primary-foreground' : ''}`}
+                                            title="Hexagon"
+                                        >
+                                            <Hexagon size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => changeShape('star')}
+                                            className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'star' ? 'bg-primary text-primary-foreground' : ''}`}
+                                            title="Star"
+                                        >
+                                            <Star size={16} />
+                                        </button>
+                                    </div>
 
-                                <div className="flex items-center gap-1 px-1">
-                                    <Minus size={14} className="text-muted-foreground" />
-                                    <input
-                                        type="range"
-                                        min="1"
-                                        max="10"
-                                        defaultValue={elements.find(el => el.id === selectedElements[0])?.strokeWidth || 2}
-                                        onMouseUp={(e) => updateSelectedElements({ strokeWidth: parseInt((e.target as HTMLInputElement).value) })}
-                                        className="w-16 h-1 bg-secondary rounded-lg appearance-none cursor-pointer"
-                                    />
-                                </div>
+                                    <div className="flex items-center gap-1 px-1">
+                                        <Minus size={14} className="text-muted-foreground" />
+                                        <input
+                                            type="range"
+                                            min="1"
+                                            max="10"
+                                            defaultValue={elements.find(el => el.id === selectedElements[0])?.strokeWidth || 2}
+                                            onMouseUp={(e) => updateSelectedElements({ strokeWidth: parseInt((e.target as HTMLInputElement).value) })}
+                                            className="w-16 h-1 bg-secondary rounded-lg appearance-none cursor-pointer"
+                                        />
+                                    </div>
 
-                                <div className="w-px h-6 bg-border mx-1" />
-                            </>
-                        )}
+                                    <div className="w-px h-6 bg-border mx-1" />
+                                </>
+                            )}
 
                         {/* Arrow Specific Controls */}
                         {elements.find(el => el.id === selectedElements[0])?.type === 'arrow' && (

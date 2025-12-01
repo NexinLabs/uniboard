@@ -6,7 +6,7 @@ import type { Element, ConnectionPoint, ArrowHandle } from './types';
  * Get connection points for an element (for arrow attachment)
  */
 export function getConnectionPoints(el: Element): ConnectionPoint[] {
-    if (el.type === 'rect' || el.type === 'image') {
+    if (el.type === 'rect' || el.type === 'image' || el.type === 'triangle' || el.type === 'diamond' || el.type === 'hexagon' || el.type === 'star') {
         const x = el.x;
         const y = el.y;
         const w = el.w || (el.type === 'image' ? 200 : 0);
