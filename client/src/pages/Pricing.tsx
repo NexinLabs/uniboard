@@ -21,7 +21,7 @@ const Pricing = () => {
             icon: Zap,
             gradient: 'from-blue-400 to-cyan-400',
             features: [
-                '3 boards',
+                '10 boards',
                 'Export to PNG',
                 'Community support',
                 'Basic collaboration'
