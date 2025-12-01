@@ -425,13 +425,22 @@ const Board = () => {
             }
 
             const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
+            const isVerticalEnd = el.toPoint?.position === 'top' || el.toPoint?.position === 'bottom';
 
-            if (isVerticalStart) {
-                points.push({ x: fromPoint.x, y: midY });
-                points.push({ x: toPoint.x, y: midY });
+            if (el.toPoint?.position && !el.controlPoint && isVerticalStart !== isVerticalEnd) {
+                if (isVerticalStart) {
+                    points.push({ x: fromPoint.x, y: toPoint.y });
+                } else {
+                    points.push({ x: toPoint.x, y: fromPoint.y });
+                }
             } else {
-                points.push({ x: midX, y: fromPoint.y });
-                points.push({ x: midX, y: toPoint.y });
+                if (isVerticalStart) {
+                    points.push({ x: fromPoint.x, y: midY });
+                    points.push({ x: toPoint.x, y: midY });
+                } else {
+                    points.push({ x: midX, y: fromPoint.y });
+                    points.push({ x: midX, y: toPoint.y });
+                }
             }
         }
 
@@ -514,15 +523,40 @@ const Board = () => {
                         endAngle = Math.atan2(pLast.y - pPrev.y, pLast.x - pPrev.x);
                     }
                 } else if (el.arrowType === 'curved') {
-                    const dx = toPoint.x - fromPoint.x;
-                    const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
-                    const controlPoint2 = { x: toPoint.x - dx / 2, y: toPoint.y };
+                    const dist = Math.sqrt(Math.pow(toPoint.x - fromPoint.x, 2) + Math.pow(toPoint.y - fromPoint.y, 2));
+                    const len = Math.max(dist * 0.5, 30);
+
+                    let cp1 = { x: fromPoint.x, y: fromPoint.y };
+                    let cp2 = { x: toPoint.x, y: toPoint.y };
+
+                    if (el.fromPoint?.position) {
+                        switch (el.fromPoint.position) {
+                            case 'top': cp1.y -= len; break;
+                            case 'bottom': cp1.y += len; break;
+                            case 'left': cp1.x -= len; break;
+                            case 'right': cp1.x += len; break;
+                        }
+                    } else {
+                        cp1.x += (toPoint.x - fromPoint.x) / 2;
+                    }
+
+                    if (el.toPoint?.position) {
+                        switch (el.toPoint.position) {
+                            case 'top': cp2.y -= len; break;
+                            case 'bottom': cp2.y += len; break;
+                            case 'left': cp2.x -= len; break;
+                            case 'right': cp2.x += len; break;
+                        }
+                    } else {
+                        cp2.x -= (toPoint.x - fromPoint.x) / 2;
+                    }
+
                     ctx.beginPath();
                     ctx.moveTo(fromPoint.x, fromPoint.y);
-                    ctx.bezierCurveTo(controlPoint1.x, controlPoint1.y, controlPoint2.x, controlPoint2.y, toPoint.x, toPoint.y);
+                    ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, toPoint.x, toPoint.y);
                     ctx.stroke();
                     // Approximate end angle for bezier
-                    endAngle = Math.atan2(toPoint.y - controlPoint2.y, toPoint.x - controlPoint2.x);
+                    endAngle = Math.atan2(toPoint.y - cp2.y, toPoint.x - cp2.x);
                 } else {
                     ctx.beginPath();
                     ctx.moveTo(fromPoint.x, fromPoint.y);
@@ -531,13 +565,28 @@ const Board = () => {
                 }
                 // ctx.stroke(); // Removed because drawRoundedPath strokes, and others stroke manually
                 ctx.setLineDash([]);
-
                 const headLength = 15;
+
+                if (el.toPoint?.position) {
+                    switch (el.toPoint.position) {
+                        case 'top': endAngle = Math.PI / 2; break;
+                        case 'bottom': endAngle = -Math.PI / 2; break;
+                        case 'left': endAngle = 0; break;
+                        case 'right': endAngle = Math.PI; break;
+                    }
+                }
 
                 // Draw start arrow head
                 if (el.arrowHead === 'start' || el.arrowHead === 'both') {
                     let startAngle;
-                    if (el.arrowType === 'elbow') {
+                    if (el.fromPoint?.position) {
+                        switch (el.fromPoint.position) {
+                            case 'top': startAngle = Math.PI / 2; break;
+                            case 'bottom': startAngle = -Math.PI / 2; break;
+                            case 'left': startAngle = 0; break;
+                            case 'right': startAngle = Math.PI; break;
+                        }
+                    } else if (el.arrowType === 'elbow') {
                         const points = getArrowPoints(el);
                         if (points.length >= 2) {
                             const p0 = points[0];
