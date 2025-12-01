@@ -1,7 +1,9 @@
 import { useContext, useEffect, useState } from 'react';
 import { AuthContext } from '../context/AuthContext';
-import axios from 'axios';
+
 import { Link, useNavigate } from 'react-router-dom';
+
+import api from '../utils/api';
 
 const Dashboard = () => {
     const { user } = useContext(AuthContext);
@@ -15,9 +17,7 @@ const Dashboard = () => {
         }
         const fetchBoards = async () => {
             try {
-                const res = await axios.get("http://localhost:5000/api/boards", {
-                    headers: { token: "Bearer " + user.token },
-                });
+                const res = await api.get("/api/boards");
                 setBoards(res.data);
             } catch (err) {
                 console.error("Error fetching boards:", err);
@@ -40,9 +40,7 @@ const Dashboard = () => {
 
         try {
             console.log("Sending create request...");
-            const res = await axios.post("http://localhost:5000/api/boards", { title }, {
-                headers: { token: "Bearer " + user.token },
-            });
+            const res = await api.post("/api/boards", { title });
             console.log("Board created:", res.data);
             setBoards((prev) => [res.data, ...prev]);
             navigate(`/board/${res.data._id}`);
