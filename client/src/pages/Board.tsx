@@ -9,11 +9,11 @@ import {
     ArrowRight, Hand,
     Minus, CornerDownRight, Activity, ArrowLeft, ArrowLeftRight,
     Plus, Search, AlignLeft, AlignCenter, AlignRight,
-    Layers, Eye, EyeOff, Copy, Scissors, Clipboard, MoreHorizontal,
+    Layers, Eye, EyeOff, Copy, Scissors, Clipboard,
     BringToFront, Download
 } from 'lucide-react';
 
-type Tool = 'select' | 'rect' | 'circle' | 'text' | 'image' | 'arrow' | 'line' | 'draw' | 'frame' | 'pan';
+type Tool = 'select' | 'rect' | 'circle' | 'text' | 'image' | 'arrow' | 'line' | 'frame' | 'pan';
 
 interface ConnectionPoint {
     x: number;
@@ -38,7 +38,6 @@ interface Element {
     toPoint?: ConnectionPoint;
     startPoint?: { x: number, y: number };
     endPoint?: { x: number, y: number };
-    // New properties
     fontSize?: number;
     fontFamily?: string;
     textAlign?: 'center' | 'left' | 'right';
@@ -131,8 +130,7 @@ const Board = () => {
     const [historyIndex, setHistoryIndex] = useState(0);
     const [selectedElements, setSelectedElements] = useState<string[]>([]);
     const [clipboard, setClipboard] = useState<Element[]>([]);
-    const [currentColor, setCurrentColor] = useState('#ffffff');
-    const [showColorPicker, setShowColorPicker] = useState(false);
+    const [currentColor] = useState('#ffffff');
     const [showPropertiesPanel, setShowPropertiesPanel] = useState(false);
 
     const [startPos, setStartPos] = useState<{ x: number, y: number } | null>(null);
@@ -290,24 +288,25 @@ const Board = () => {
         // Setup Socket.IO connection
         if (!socketRef.current && id) {
             console.log('Connecting to Socket.IO...');
-            socketRef.current = io(appConfig.API_URL);
+            const socket = io(appConfig.API_URL);
+            socketRef.current = socket;
 
             // Join the board room
-            socketRef.current.emit('join-board', id);
+            socket.emit('join-board', id);
             console.log('Joined board room:', id);
 
             // Listen for updates from other users
-            socketRef.current.on('elements-updated', (updatedElements: Element[]) => {
+            socket.on('elements-updated', (updatedElements: Element[]) => {
                 console.log('📡 Received elements update from another user');
                 setElements(updatedElements);
                 addToHistory(updatedElements);
             });
 
-            socketRef.current.on('user-joined', (data: any) => {
+            socket.on('user-joined', (data: any) => {
                 console.log('👋 User joined:', data.userId);
             });
 
-            socketRef.current.on('user-left', (data: any) => {
+            socket.on('user-left', (data: any) => {
                 console.log('👋 User left:', data.userId);
             });
         }
@@ -1438,12 +1437,15 @@ const Board = () => {
 
     const paste = async () => {
         if (clipboard.length === 0) return;
-        const newElements = clipboard.map(el => ({
-            ...el,
-            id: Date.now().toString() + Math.random(),
-            x: el.x + 20,
-            y: el.y + 20
-        }));
+        const newElements = clipboard.map(el => {
+            const newEl = {
+                ...el,
+                id: Date.now().toString() + Math.random(),
+                x: el.x + 20,
+                y: el.y + 20
+            };
+            return newEl;
+        });
         const allElements = [...elements, ...newElements];
         setElements(allElements);
         setSelectedElements(newElements.map(el => el.id));
@@ -1616,7 +1618,7 @@ const Board = () => {
         }));
     };
 
-    const handleLayerDragStart = (e: React.DragEvent, index: number) => {
+    const handleLayerDragStart = (_e: React.DragEvent, index: number) => {
         setDraggedLayerIndex(index);
     };
 
@@ -1685,6 +1687,12 @@ const Board = () => {
                         setTool('select');
                     }
                     break;
+                case 'c':
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        copySelected();
+                    }
+                    break;
                 case 'r':
                     setTool('rect');
                     break;
@@ -1704,9 +1712,6 @@ const Board = () => {
                     break;
                 case 'l':
                     setTool('line');
-                    break;
-                case 'd':
-                    setTool('draw');
                     break;
                 case 'f':
                     setTool('frame');
@@ -1810,15 +1815,6 @@ const Board = () => {
                         <Minus size={20} className="rotate-45" />
                         <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">L</span>
                         <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Line</span>
-                    </button>
-
-                    <button
-                        onClick={() => setTool('draw')}
-                        className={`p-2 rounded relative group ${tool === 'draw' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <Activity size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">D</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Draw</span>
                     </button>
 
                     <button
