@@ -41,9 +41,16 @@ router.get('/', verifyToken, async (req, res) => {
 // Get Single Board
 router.get('/:id', verifyToken, async (req, res) => {
     try {
-        const board = await Board.findById(req.params.id);
+        const board = await Board.findById(req.params.id).populate('collaborators.user', 'username email');
         if (!board) return res.status(404).json("Board not found");
-        if (board.user.toString() !== req.user.id) return res.status(403).json("You are not allowed to view this board");
+
+        const isOwner = board.user.toString() === req.user.id;
+        const isCollaborator = board.collaborators.some(c => c.user._id.toString() === req.user.id);
+        const isPublic = board.visibility === 'public-view' || board.visibility === 'public-edit';
+
+        if (!isOwner && !isCollaborator && !isPublic) {
+            return res.status(403).json("You are not allowed to view this board");
+        }
         res.status(200).json(board);
     } catch (err) {
         res.status(500).json(err);
@@ -55,11 +62,18 @@ router.put('/:id', verifyToken, async (req, res) => {
     try {
         const board = await Board.findById(req.params.id);
         if (!board) return res.status(404).json("Board not found");
-        if (board.user.toString() !== req.user.id) return res.status(403).json("You are not allowed to update this board");
+
+        const isOwner = board.user.toString() === req.user.id;
+        const isEditor = board.collaborators.some(c => c.user.toString() === req.user.id && c.role === 'editor');
+        const isPublicEdit = board.visibility === 'public-edit';
+
+        if (!isOwner && !isEditor && !isPublicEdit) {
+            return res.status(403).json("You are not allowed to update this board");
+        }
 
         const updatedBoard = await Board.findByIdAndUpdate(req.params.id, {
             $set: req.body,
-        }, { new: true });
+        }, { new: true }).populate('collaborators.user', 'username email');
         res.status(200).json(updatedBoard);
     } catch (err) {
         res.status(500).json(err);

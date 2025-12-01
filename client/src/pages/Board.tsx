@@ -1,16 +1,17 @@
 import { useContext, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { io, Socket } from 'socket.io-client';
 import { appConfig } from '../config';
 import api from '../utils/api';
 import {
-    Square, Circle, Type, Trash2, MousePointer,
+    Square, Circle, Type, Trash2, MousePointer2,
     ArrowRight, Hand,
     Minus, CornerDownRight, Activity, ArrowLeft, ArrowLeftRight,
-    Plus, Search, AlignLeft, AlignCenter, AlignRight,
+    Search, AlignLeft, AlignCenter, AlignRight,
     Layers, Eye, EyeOff, Copy, Scissors, Clipboard,
-    BringToFront, Download
+    BringToFront, Download,
+    Share2, Menu, User, LayoutDashboard, LogOut, X, Globe, Lock, Image
 } from 'lucide-react';
 
 type Tool = 'select' | 'rect' | 'circle' | 'text' | 'image' | 'arrow' | 'line' | 'frame' | 'pan';
@@ -152,6 +153,16 @@ const Board = () => {
     const [isPanning, setIsPanning] = useState(false);
     const zoom = 1;
 
+    // Board Metadata State
+    const [boardTitle, setBoardTitle] = useState('Untitled Board');
+    const [visibility, setVisibility] = useState<'private' | 'public-view' | 'public-edit'>('private');
+    const [collaborators, setCollaborators] = useState<any[]>([]);
+    const [ownerId, setOwnerId] = useState<string | null>(null);
+    const [showShareModal, setShowShareModal] = useState(false);
+    const [showMenuDropdown, setShowMenuDropdown] = useState(false);
+    const [inviteEmail, setInviteEmail] = useState('');
+    const [inviteRole, setInviteRole] = useState<'viewer' | 'editor'>('viewer');
+
     const getArrowHandles = (el: Element): { type: 'start' | 'end' | 'control', x: number, y: number }[] => {
         if (el.type !== 'arrow') return [];
         const handles: { type: 'start' | 'end' | 'control', x: number, y: number }[] = [];
@@ -277,6 +288,10 @@ const Board = () => {
                 const res = await api.get(`/api/boards/${id}`);
                 const loadedElements = res.data.elements || [];
                 setElements(loadedElements);
+                setBoardTitle(res.data.title || 'Untitled Board');
+                setVisibility(res.data.visibility || 'private');
+                setCollaborators(res.data.collaborators || []);
+                setOwnerId(res.data.user || null);
                 setHistory([loadedElements]);
                 setHistoryIndex(0);
             } catch (err) {
@@ -288,7 +303,10 @@ const Board = () => {
         // Setup Socket.IO connection
         if (!socketRef.current && id) {
             console.log('Connecting to Socket.IO...');
-            const socket = io(appConfig.API_URL);
+            const token = localStorage.getItem('token');
+            const socket = io(appConfig.API_URL, {
+                auth: { token: `Bearer ${token}` }
+            });
             socketRef.current = socket;
 
             // Join the board room
@@ -323,9 +341,6 @@ const Board = () => {
             }
         };
     }, [id, user]);
-
-    // REMOVED: No longer needed - server handles DB saves via Socket.IO
-    // const saveElements = async (elementsToSave: Element[]) => { ... }
 
     // Emit changes via Socket.IO ONLY - server handles DB save
     const emitElements = (elementsToSave: Element[]) => {
@@ -457,8 +472,6 @@ const Board = () => {
             const p0 = points[i - 1];
             const p1 = points[i];
             const p2 = points[i + 1];
-            // Limit radius to half the length of the shortest adjacent segment to avoid artifacts
-            // We check both X and Y distances, one will be 0 for orthogonal lines, so we take the max of the diffs
             const dist1 = Math.max(Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y));
             const dist2 = Math.max(Math.abs(p2.x - p1.x), Math.abs(p2.y - p1.y));
             const r = Math.min(radius, dist1 / 2, dist2 / 2);
@@ -516,7 +529,6 @@ const Board = () => {
                     const points = getArrowPoints(el);
                     drawRoundedPath(ctx, points, 12); // Radius 12
 
-                    // Calculate end angle from last segment
                     if (points.length >= 2) {
                         const pLast = points[points.length - 1];
                         const pPrev = points[points.length - 2];
@@ -555,7 +567,6 @@ const Board = () => {
                     ctx.moveTo(fromPoint.x, fromPoint.y);
                     ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, toPoint.x, toPoint.y);
                     ctx.stroke();
-                    // Approximate end angle for bezier
                     endAngle = Math.atan2(toPoint.y - cp2.y, toPoint.x - cp2.x);
                 } else {
                     ctx.beginPath();
@@ -563,7 +574,6 @@ const Board = () => {
                     ctx.lineTo(toPoint.x, toPoint.y);
                     ctx.stroke();
                 }
-                // ctx.stroke(); // Removed because drawRoundedPath strokes, and others stroke manually
                 ctx.setLineDash([]);
                 const headLength = 15;
 
@@ -788,7 +798,7 @@ const Board = () => {
                 }
             } else if (el.type === 'image' && el.imageUrl) {
                 ctx.globalAlpha = el.opacity || 1;
-                const img = new Image();
+                const img = new window.Image();
                 img.src = el.imageUrl;
                 if (img.complete) {
                     ctx.drawImage(img, el.x, el.y, el.w || 200, el.h || 200);
@@ -1177,11 +1187,22 @@ const Board = () => {
         }
     };
 
+    const isReadOnly = () => {
+        if (!user || !ownerId) return true; // Loading or not logged in
+        if (user._id === ownerId) return false; // Owner
+        if (visibility === 'public-edit') return false; // Public Edit
+        const collaborator = collaborators.find(c => c.user._id === user._id);
+        if (collaborator && collaborator.role === 'editor') return false; // Editor
+        return true; // Everyone else (viewer, public-view, private)
+    };
+
     const startDrawing = (e: React.MouseEvent) => {
         if (contextMenu) {
             setContextMenu(null);
             return;
         }
+
+        if (isReadOnly() && tool !== 'pan') return;
 
         const { x, y } = getCanvasCoords(e);
 
@@ -1409,6 +1430,7 @@ const Board = () => {
     };
 
     const deleteSelected = async () => {
+        if (isReadOnly()) return;
         if (selectedElements.length === 0) return;
         const newElements = elements.filter(el => {
             if (selectedElements.includes(el.id)) return false;
@@ -1431,11 +1453,13 @@ const Board = () => {
     };
 
     const cutSelected = () => {
+        if (isReadOnly()) return;
         copySelected();
         deleteSelected();
     };
 
     const paste = async () => {
+        if (isReadOnly()) return;
         if (clipboard.length === 0) return;
         const newElements = clipboard.map(el => {
             const newEl = {
@@ -1471,6 +1495,7 @@ const Board = () => {
     };
 
     const handleImageUpload = () => {
+        if (isReadOnly()) return;
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
@@ -1500,6 +1525,7 @@ const Board = () => {
     };
 
     const updateSelectedElements = (updates: Partial<Element>) => {
+        if (isReadOnly()) return;
         if (selectedElements.length === 0) return;
         const newElements = elements.map(el => {
             if (selectedElements.includes(el.id)) {
@@ -1517,6 +1543,7 @@ const Board = () => {
     };
 
     const changeShape = (newType: 'rect' | 'circle') => {
+        if (isReadOnly()) return;
         if (selectedElements.length === 0) return;
         const newElements = elements.map(el => {
             if (selectedElements.includes(el.id)) {
@@ -1550,6 +1577,7 @@ const Board = () => {
     };
 
     const updateArrowStyle = (id: string, updates: Partial<Element>) => {
+        if (isReadOnly()) return;
         const newElements = elements.map(el => {
             if (el.id === id) {
                 return { ...el, ...updates };
@@ -1563,6 +1591,7 @@ const Board = () => {
     };
 
     const toggleVisibility = (id: string) => {
+        if (isReadOnly()) return;
         const newElements = elements.map(el => {
             if (el.id === id) {
                 return { ...el, isHidden: !el.isHidden };
@@ -1587,6 +1616,7 @@ const Board = () => {
 
     const handleCanvasDrop = async (e: React.DragEvent) => {
         e.preventDefault();
+        if (isReadOnly()) return;
         const file = e.dataTransfer.files[0];
         if (file && file.type.startsWith('image/')) {
             const { x, y } = getCanvasCoords(e as unknown as React.MouseEvent);
@@ -1624,6 +1654,7 @@ const Board = () => {
 
     const handleLayerDrop = (e: React.DragEvent, targetIndex: number) => {
         e.preventDefault();
+        if (isReadOnly()) return;
         if (draggedLayerIndex === null) return;
         if (draggedLayerIndex === targetIndex) return;
 
@@ -1639,17 +1670,58 @@ const Board = () => {
         emitElements(newElements);
         setDraggedLayerIndex(null);
     };
+    const updateBoard = async (updates: any) => {
+        if (isReadOnly()) return;
+        try {
+            await api.put(`/api/boards/${id}`, updates);
+            if (updates.title) setBoardTitle(updates.title);
+            if (updates.visibility) setVisibility(updates.visibility);
+            if (updates.collaborators) setCollaborators(updates.collaborators);
+        } catch (err) {
+            console.error("Failed to update board", err);
+        }
+    };
+
+    const handleInvite = async () => {
+        if (!inviteEmail) return;
+        try {
+            // First search for user
+            const userRes = await api.get(`/api/users/search?q=${inviteEmail}`);
+            if (userRes.data.length > 0) {
+                const userToAdd = userRes.data[0];
+                // Check if already collaborator
+                if (collaborators.some(c => c.user._id === userToAdd._id)) {
+                    alert("User is already a collaborator");
+                    return;
+                }
+                const newCollaborators = [...collaborators, { user: userToAdd._id, role: inviteRole }];
+
+                // Optimistic update
+                const newCollabsState = [...collaborators, { user: userToAdd, role: inviteRole }];
+                setCollaborators(newCollabsState);
+                setInviteEmail('');
+
+                await updateBoard({ collaborators: newCollaborators });
+            } else {
+                alert("User not found");
+            }
+        } catch (err) {
+            console.error("Invite failed", err);
+        }
+    };
 
     const handlersRef = useRef({
         undo, redo, paste, setTool, setSelectedElements,
         copySelected, cutSelected, deleteSelected, handleImageUpload,
-        setArrowStart, elements, clipboard, history, historyIndex
+        setArrowStart, elements, clipboard, history, historyIndex,
+        setShowLayers
     });
 
     handlersRef.current = {
         undo, redo, paste, setTool, setSelectedElements,
         copySelected, cutSelected, deleteSelected, handleImageUpload,
-        setArrowStart, elements, clipboard, history, historyIndex
+        setArrowStart, elements, clipboard, history, historyIndex,
+        setShowLayers
     };
 
     useEffect(() => {
@@ -1659,10 +1731,11 @@ const Board = () => {
             const {
                 undo, redo, paste, setTool, setSelectedElements,
                 copySelected, cutSelected, deleteSelected, handleImageUpload,
-                setArrowStart, elements
+                setArrowStart, elements, setShowLayers
             } = handlersRef.current;
 
             if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                if (isReadOnly()) return;
                 e.preventDefault();
                 if (e.shiftKey) {
                     redo();
@@ -1673,6 +1746,7 @@ const Board = () => {
             }
 
             if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+                if (isReadOnly()) return;
                 e.preventDefault();
                 redo();
                 return;
@@ -1681,6 +1755,7 @@ const Board = () => {
             switch (e.key.toLowerCase()) {
                 case 'v':
                     if (e.ctrlKey || e.metaKey) {
+                        if (isReadOnly()) return;
                         e.preventDefault();
                         paste();
                     } else {
@@ -1694,39 +1769,43 @@ const Board = () => {
                     }
                     break;
                 case 'r':
-                    setTool('rect');
+                    if (!isReadOnly()) setTool('rect');
                     break;
                 case 'o':
-                    setTool('circle');
+                    if (!isReadOnly()) setTool('circle');
                     break;
                 case 't':
-                    setTool('text');
+                    if (!isReadOnly()) setTool('text');
                     break;
                 case 'a':
                     if (e.ctrlKey || e.metaKey) {
                         e.preventDefault();
                         setSelectedElements(elements.map(el => el.id));
                     } else {
-                        setTool('arrow');
+                        if (!isReadOnly()) setTool('arrow');
                     }
                     break;
                 case 'l':
-                    setTool('line');
+                    if (!isReadOnly()) setTool('line');
                     break;
                 case 'f':
-                    setTool('frame');
+                    if (!isReadOnly()) setTool('frame');
                     break;
                 case 'i':
-                    handleImageUpload();
+                    if (!isReadOnly()) handleImageUpload();
                     break;
                 case 'x':
                     if (e.ctrlKey || e.metaKey) {
+                        if (isReadOnly()) return;
                         e.preventDefault();
                         cutSelected();
+                    } else {
+                        setShowLayers((prev: boolean) => !prev);
                     }
                     break;
                 case 'delete':
                 case 'backspace':
+                    if (isReadOnly()) return;
                     e.preventDefault();
                     deleteSelected();
                     break;
@@ -1757,88 +1836,131 @@ const Board = () => {
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
         };
-    }, []); // Empty dependency array to prevent re-binding
+    }, []);
 
     return (
-        <div className="h-[calc(100vh-80px)] bg-zinc-900 rounded-lg border border-border relative overflow-hidden flex">
-            <div className="absolute top-4 left-4 flex flex-col gap-2 z-10">
-                {/* Top Group */}
-                <div className="bg-card border border-border rounded-lg p-1 flex flex-col gap-1 shadow-lg">
-                    <button className="p-2 rounded hover:bg-secondary text-muted-foreground hover:text-foreground relative group">
-                        <Plus size={20} />
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Insert (I)</span>
-                    </button>
+        <div className="flex flex-col h-screen bg-background text-foreground">
+            {/* Header */}
+            <header className="h-14 border-b border-border flex items-center justify-between px-4 bg-card z-20">
+                <div className="flex items-center gap-4">
+                    <Link to="/dashboard" className="p-2 hover:bg-secondary rounded-full">
+                        <ArrowLeft size={20} />
+                    </Link>
+                    <input
+                        value={boardTitle}
+                        onChange={(e) => updateBoard({ title: e.target.value })}
+                        disabled={isReadOnly()}
+                        className={`bg-transparent font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-primary rounded px-2 ${isReadOnly() ? 'cursor-default opacity-80' : 'hover:bg-secondary/50'}`}
+                    />
                 </div>
+                <div className="flex items-center gap-2">
+                    <div className="flex -space-x-2 mr-4">
+                        {collaborators.map((c, i) => (
+                            <div key={i} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs border-2 border-background" title={c.user.username}>
+                                {c.user.username[0].toUpperCase()}
+                            </div>
+                        ))}
+                        {user && !collaborators.some(c => c.user._id === user._id) && (
+                            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs border-2 border-background" title={user.username + " (You)"}>
+                                {user.username[0].toUpperCase()}
+                            </div>
+                        )}
+                    </div>
 
-                {/* Main Tools Group */}
-                <div className="bg-card border border-border rounded-lg p-1 flex flex-col gap-1 shadow-lg">
+                    <button
+                        onClick={() => setShowShareModal(true)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors"
+                    >
+                        <Share2 size={16} />
+                        <span className="text-sm font-medium">Share</span>
+                    </button>
+
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowMenuDropdown(!showMenuDropdown)}
+                            className="p-2 hover:bg-secondary rounded"
+                        >
+                            <Menu size={20} />
+                        </button>
+
+                        {showMenuDropdown && (
+                            <div className="absolute right-0 top-full mt-2 w-48 bg-card border border-border rounded-lg shadow-lg py-1 z-50">
+                                <button className="w-full text-left px-4 py-2 text-sm hover:bg-secondary flex items-center gap-2">
+                                    <User size={16} /> Profile
+                                </button>
+                                <Link to="/dashboard" className="w-full text-left px-4 py-2 text-sm hover:bg-secondary flex items-center gap-2">
+                                    <LayoutDashboard size={16} /> Dashboard
+                                </Link>
+                                <div className="h-px bg-border my-1" />
+                                <button onClick={() => {
+                                    localStorage.removeItem('token');
+                                    window.location.href = '/login';
+                                }} className="w-full text-left px-4 py-2 text-sm hover:bg-secondary text-destructive flex items-center gap-2">
+                                    <LogOut size={16} /> Logout
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </header>
+
+            {/* Toolbar */}
+            {!isReadOnly() && (
+                <div className="absolute top-20 left-4 flex flex-col gap-2 bg-card border border-border p-2 rounded-lg shadow-lg z-20">
                     <button
                         onClick={() => setTool('select')}
                         className={`p-2 rounded relative group ${tool === 'select' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
                     >
-                        <MousePointer size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">V</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Select</span>
+                        <MousePointer2 size={20} />
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Select (V)</span>
                     </button>
-
                     <button
                         onClick={() => setTool('rect')}
                         className={`p-2 rounded relative group ${tool === 'rect' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
                     >
                         <Square size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">R</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Rectangle</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Rectangle (R)</span>
                     </button>
-
                     <button
                         onClick={() => setTool('circle')}
                         className={`p-2 rounded relative group ${tool === 'circle' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
                     >
                         <Circle size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">O</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Circle</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Circle (O)</span>
                     </button>
-
                     <button
                         onClick={() => setTool('arrow')}
                         className={`p-2 rounded relative group ${tool === 'arrow' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
                     >
                         <ArrowRight size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">A</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Arrow</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Arrow (A)</span>
                     </button>
-
                     <button
                         onClick={() => setTool('line')}
                         className={`p-2 rounded relative group ${tool === 'line' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
                     >
                         <Minus size={20} className="rotate-45" />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">L</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Line</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Line (L)</span>
                     </button>
-
                     <button
                         onClick={() => setTool('text')}
                         className={`p-2 rounded relative group ${tool === 'text' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
                     >
                         <Type size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">T</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Text</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Text (T)</span>
                     </button>
-
                     <button
                         onClick={handleImageUpload}
                         className={`p-2 rounded relative group hover:bg-secondary text-muted-foreground hover:text-foreground`}
                     >
-                        <Search size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">I</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Image</span>
+                        <Image size={20} />
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Image (I)</span>
                     </button>
                 </div>
-            </div>
+            )}
 
-            <div className="flex-1 relative">
-                <div className="absolute top-4 right-4 flex gap-2 z-10">
+            <div className="flex-1 relative overflow-hidden">
+                <div className="absolute top-4 right-6 flex gap-2 z-10">
                     <button
                         onClick={() => setTool('pan')}
                         className={`p-2 rounded border border-border shadow-sm ${tool === 'pan' ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-secondary text-muted-foreground'}`}
@@ -1856,7 +1978,7 @@ const Board = () => {
                 </div>
 
                 {showLayers && (
-                    <div className="absolute top-16 right-4 w-64 bg-card border border-border rounded-lg shadow-lg flex flex-col max-h-[calc(100vh-100px)] z-20">
+                    <div className="absolute top-16 right-4 w-64 bg-card border border-border rounded-lg shadow-lg flex flex-col max-h-[calc(100%-5rem)] z-20">
                         <div className="p-2 border-b border-border font-bold text-sm flex justify-between items-center">
                             <span>Layers</span>
                             <span className="text-xs text-muted-foreground">{elements.length} elements</span>
@@ -1982,7 +2104,7 @@ const Board = () => {
                             <Copy size={14} /> <span>Duplicate</span> <span className="ml-auto text-muted-foreground">Ctrl D</span>
                         </button>
                         <button onClick={() => setSelectedElements(elements.map(e => e.id))} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
-                            <MousePointer size={14} /> <span>Select all</span> <span className="ml-auto text-muted-foreground">Ctrl A</span>
+                            <MousePointer2 size={14} /> <span>Select all</span> <span className="ml-auto text-muted-foreground">Ctrl A</span>
                         </button>
 
                         <div className="h-px bg-border my-1" />
@@ -2380,7 +2502,92 @@ const Board = () => {
                     <div className="hidden"></div>
                 )}
             </div>
+
+            {/* Share Modal */}
+            {showShareModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-card border border-border rounded-lg shadow-lg p-6 w-96">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-bold">Share Board</h2>
+                            <button onClick={() => setShowShareModal(false)} className="text-muted-foreground hover:text-foreground">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div className="mb-6">
+                            <label className="block text-sm font-medium mb-2">Visibility</label>
+                            <div className="flex gap-2 p-1 bg-secondary rounded-lg">
+                                <button
+                                    onClick={() => updateBoard({ visibility: 'private' })}
+                                    className={`flex-1 py-1 px-2 rounded text-sm ${visibility === 'private' ? 'bg-background shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                >
+                                    <Lock size={14} className="inline mr-1" /> Private
+                                </button>
+                                <button
+                                    onClick={() => updateBoard({ visibility: 'public-view' })}
+                                    className={`flex-1 py-1 px-2 rounded text-sm ${visibility === 'public-view' ? 'bg-background shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                >
+                                    <Globe size={14} className="inline mr-1" /> Public View
+                                </button>
+                                <button
+                                    onClick={() => updateBoard({ visibility: 'public-edit' })}
+                                    className={`flex-1 py-1 px-2 rounded text-sm ${visibility === 'public-edit' ? 'bg-background shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                >
+                                    <Globe size={14} className="inline mr-1" /> Public Edit
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium mb-2">Invite Collaborator</label>
+                            <div className="flex gap-2">
+                                <input
+                                    type="email"
+                                    placeholder="Email address"
+                                    value={inviteEmail}
+                                    onChange={(e) => setInviteEmail(e.target.value)}
+                                    className="flex-1 bg-background border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                                />
+                                <select
+                                    value={inviteRole}
+                                    onChange={(e) => setInviteRole(e.target.value as 'viewer' | 'editor')}
+                                    className="bg-background border border-border rounded px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                                >
+                                    <option value="viewer">Viewer</option>
+                                    <option value="editor">Editor</option>
+                                </select>
+                                <button
+                                    onClick={handleInvite}
+                                    className="bg-primary text-primary-foreground px-3 py-2 rounded text-sm hover:bg-primary/90"
+                                >
+                                    Invite
+                                </button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium mb-2">Collaborators</label>
+                            <div className="space-y-2 max-h-40 overflow-y-auto">
+                                {collaborators.map((c, i) => (
+                                    <div key={i} className="flex justify-between items-center p-2 bg-secondary/50 rounded">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs">
+                                                {c.user.username[0].toUpperCase()}
+                                            </div>
+                                            <span className="text-sm">{c.user.username}</span>
+                                        </div>
+                                        <span className="text-xs text-muted-foreground capitalize">{c.role}</span>
+                                    </div>
+                                ))}
+                                {collaborators.length === 0 && (
+                                    <div className="text-sm text-muted-foreground text-center py-2">No collaborators yet</div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
-    );
+    )
 };
 export default Board;
