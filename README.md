@@ -1,6 +1,8 @@
 # Uniboard
-
 Uniboard is a professional-grade, real-time collaborative whiteboard application designed for teams and individuals to brainstorm, plan, and create together. Built with the MERN stack (MongoDB, Express, React, Node.js) and powered by Socket.IO for instant updates.
+
+<image src="https://github.com/Hunter87ff/uniboard/blob/main/assets/landing_ss.png?raw=true"/>
+
 
 ## 🚀 Features
 
