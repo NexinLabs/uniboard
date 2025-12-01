@@ -4,6 +4,8 @@ import { AuthContext } from '../context/AuthContext';
 import { io, Socket } from 'socket.io-client';
 import { appConfig } from '../config';
 import api from '../utils/api';
+import Collaborator from '../utils/board/action/collaborator';
+
 import {
     Square, Circle, Type, Trash2, MousePointer2,
     ArrowRight, Hand,
@@ -213,48 +215,26 @@ const Board = () => {
     };
 
     const handleRemoveCollaborator = async (userId: string) => {
-        if (isReadOnly()) return;
-        const previousCollaborators = [...collaborators];
-        const newCollaborators = collaborators.filter(c => (c.user?._id || c.user) !== userId);
-
-        setCollaborators(newCollaborators);
-        setActiveCollaboratorMenu(null);
-
-        try {
-            const res = await api.delete(`/api/boards/${id}/collaborators/${userId}`);
-            // Sync with server response
-            const editors = (res.data.editors || []).map((u: any) => ({ user: u, role: 'editor' }));
-            const viewers = (res.data.viewers || []).map((u: any) => ({ user: u, role: 'viewer' }));
-            setCollaborators([...editors, ...viewers]);
-        } catch (error) {
-            console.error("Failed to remove collaborator", error);
-            setCollaborators(previousCollaborators);
-        }
+        Collaborator.handleRemoveCollaborator({
+            id: id!,
+            collaborators,
+            setCollaborators,
+            userId,
+            isReadOnly,
+            setActiveCollaboratorMenu
+        });
     };
 
     const handleUpdateCollaboratorRole = async (userId: string, newRole: 'viewer' | 'editor') => {
-        if (isReadOnly()) return;
-        const previousCollaborators = [...collaborators];
-        const newCollaborators = collaborators.map(c => {
-            if ((c.user?._id || c.user) === userId) {
-                return { ...c, role: newRole };
-            }
-            return c;
-        });
 
-        setCollaborators(newCollaborators);
-        setActiveCollaboratorMenu(null);
-
-        try {
-            const res = await api.put(`/api/boards/${id}/collaborators/${userId}`, { role: newRole });
-            // Sync with server response
-            const editors = (res.data.editors || []).map((u: any) => ({ user: u, role: 'editor' }));
-            const viewers = (res.data.viewers || []).map((u: any) => ({ user: u, role: 'viewer' }));
-            setCollaborators([...editors, ...viewers]);
-        } catch (error) {
-            console.error("Failed to update role", error);
-            setCollaborators(previousCollaborators);
-        }
+        Collaborator.handleUpdateCollaboratorRole({
+            id: id!,
+            collaborators,
+            setCollaborators,
+            userId,
+            isReadOnly,
+            setActiveCollaboratorMenu
+        }, newRole);
     };
 
     const getCanvasCoords = (e: React.MouseEvent) => {
@@ -496,13 +476,15 @@ const Board = () => {
         e.preventDefault();
         const { x, y } = getCanvasCoords(e);
         const element = getElementAtPos(x, y, elements);
+
+        setContextMenu({ x: e.clientX, y: e.clientY, elementId: element ? element.id : '' });
+
         if (element) {
-            setContextMenu({ x: e.clientX, y: e.clientY, elementId: element.id });
             if (!selectedElements.includes(element.id)) {
                 setSelectedElements([element.id]);
             }
         } else {
-            setContextMenu(null);
+            setSelectedElements([]);
         }
     };
 
@@ -648,8 +630,6 @@ const Board = () => {
             setCurrentPos({ x, y });
         }
     };
-
-
 
     const startDrawing = (e: React.MouseEvent) => {
         if (contextMenu) {
@@ -915,6 +895,37 @@ const Board = () => {
     const paste = async () => {
         if (isReadOnly()) return;
         try {
+            try {
+                const clipboardItems = await navigator.clipboard.read();
+                for (const item of clipboardItems) {
+                    if (item.types.some(type => type.startsWith('image/'))) {
+                        const blob = await item.getType(item.types.find(type => type.startsWith('image/'))!);
+                        const file = new File([blob], "pasted-image.png", { type: blob.type });
+                        const imageUrl = await uploadImage(file);
+                        if (imageUrl) {
+                            const x = -panOffset.x / zoom + 100;
+                            const y = -panOffset.y / zoom + 100;
+                            const newElement: Element = {
+                                id: Date.now().toString(),
+                                type: 'image',
+                                x,
+                                y,
+                                w: 200,
+                                h: 200,
+                                imageUrl: imageUrl
+                            };
+                            const newElements = [...elements, newElement];
+                            setElements(newElements);
+                            addToHistory(newElements);
+                            emitElements(newElements);
+                            return;
+                        }
+                    }
+                }
+            } catch (readError) {
+                console.warn("Clipboard read failed, falling back to text", readError);
+            }
+
             const text = await navigator.clipboard.readText();
             const clipboardEls = JSON.parse(text) as Element[];
             if (Array.isArray(clipboardEls) && clipboardEls.length > 0) {
@@ -1078,10 +1089,11 @@ const Board = () => {
         emitElements(newElements);
         setDraggedLayerIndex(null);
     };
+
     const updateBoard = async (updates: any) => {
         if (isReadOnly()) return;
         try {
-            const res = await api.put(`/ api / boards / ${id} `, updates);
+            const res = await api.put(`/api/boards/${id}`, updates);
             if (res.data.title) setBoardTitle(res.data.title);
             if (res.data.visibility) setVisibility(res.data.visibility);
             if (res.data.editors || res.data.viewers) {
@@ -1101,7 +1113,7 @@ const Board = () => {
         // or we could add a temporary placeholder if we wanted.
 
         try {
-            const res = await api.post(`/ api / boards / ${id}/collaborators`, { email: inviteEmail, role: inviteRole });
+            const res = await api.post(`/api/boards/${id}/collaborators`, { email: inviteEmail, role: inviteRole });
 
             // Sync with server response
             const editors = (res.data.editors || []).map((u: any) => ({ user: u, role: 'editor' }));
@@ -1498,16 +1510,28 @@ const Board = () => {
                         className="absolute bg-card border border-border rounded shadow-lg p-1 z-50 flex flex-col min-w-[200px]"
                         style={{ left: contextMenu.x, top: contextMenu.y }}
                     >
-                        <button onClick={cutSelected} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                        <button
+                            onClick={cutSelected}
+                            disabled={!contextMenu.elementId}
+                            className={`flex items-center gap-2 p-2 rounded text-xs text-left ${!contextMenu.elementId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-secondary'}`}
+                        >
                             <Scissors size={14} /> <span>Cut</span> <span className="ml-auto text-muted-foreground">Ctrl X</span>
                         </button>
-                        <button onClick={copySelected} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                        <button
+                            onClick={copySelected}
+                            disabled={!contextMenu.elementId}
+                            className={`flex items-center gap-2 p-2 rounded text-xs text-left ${!contextMenu.elementId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-secondary'}`}
+                        >
                             <Copy size={14} /> <span>Copy</span> <span className="ml-auto text-muted-foreground">Ctrl C</span>
                         </button>
                         <button onClick={paste} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
                             <Clipboard size={14} /> <span>Paste</span> <span className="ml-auto text-muted-foreground">Ctrl V</span>
                         </button>
-                        <button onClick={() => { copySelected(); paste(); }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                        <button
+                            onClick={() => { copySelected(); paste(); }}
+                            disabled={!contextMenu.elementId}
+                            className={`flex items-center gap-2 p-2 rounded text-xs text-left ${!contextMenu.elementId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-secondary'}`}
+                        >
                             <Copy size={14} /> <span>Duplicate</span> <span className="ml-auto text-muted-foreground">Ctrl D</span>
                         </button>
                         <button onClick={() => setSelectedElements(elements.map(e => e.id))} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
@@ -1523,64 +1547,73 @@ const Board = () => {
                         <div className="h-px bg-border my-1" />
 
                         <div className="relative group/order">
-                            <button className="w-full flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                            <button
+                                disabled={!contextMenu.elementId}
+                                className={`w-full flex items-center gap-2 p-2 rounded text-xs text-left ${!contextMenu.elementId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-secondary'}`}
+                            >
                                 <BringToFront size={14} /> <span>Change Order</span> <ArrowRight size={12} className="ml-auto" />
                             </button>
-                            <div className="absolute left-full top-0 ml-1 bg-card border border-border rounded shadow-lg p-1 flex-col min-w-[150px] hidden group-hover/order:flex">
-                                <button onClick={() => {
-                                    // Bring forward
-                                    const idx = elements.findIndex(e => e.id === contextMenu.elementId);
-                                    if (idx < elements.length - 1) {
-                                        const newEls = [...elements];
-                                        [newEls[idx], newEls[idx + 1]] = [newEls[idx + 1], newEls[idx]];
-                                        setElements(newEls);
-                                        emitElements(newEls);
-                                    }
-                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
-                                    <span>Bring forward</span> <span className="ml-auto text-muted-foreground">Ctrl ]</span>
-                                </button>
-                                <button onClick={() => {
-                                    // Send backward
-                                    const idx = elements.findIndex(e => e.id === contextMenu.elementId);
-                                    if (idx > 0) {
-                                        const newEls = [...elements];
-                                        [newEls[idx], newEls[idx - 1]] = [newEls[idx - 1], newEls[idx]];
-                                        setElements(newEls);
-                                        emitElements(newEls);
-                                    }
-                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
-                                    <span>Send backward</span> <span className="ml-auto text-muted-foreground">Ctrl [</span>
-                                </button>
-                                <button onClick={() => {
-                                    // Bring to front
-                                    const newEls = elements.filter(e => e.id !== contextMenu.elementId);
-                                    const el = elements.find(e => e.id === contextMenu.elementId);
-                                    if (el) {
-                                        newEls.push(el);
-                                        setElements(newEls);
-                                        emitElements(newEls);
-                                    }
-                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
-                                    <span>Bring to front</span> <span className="ml-auto text-muted-foreground">]</span>
-                                </button>
-                                <button onClick={() => {
-                                    // Send to back
-                                    const newEls = elements.filter(e => e.id !== contextMenu.elementId);
-                                    const el = elements.find(e => e.id === contextMenu.elementId);
-                                    if (el) {
-                                        newEls.unshift(el);
-                                        setElements(newEls);
-                                        emitElements(newEls);
-                                    }
-                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
-                                    <span>Send to back</span> <span className="ml-auto text-muted-foreground">[</span>
-                                </button>
-                            </div>
+                            {contextMenu.elementId && (
+                                <div className="absolute left-full top-0 ml-1 bg-card border border-border rounded shadow-lg p-1 flex-col min-w-[150px] hidden group-hover/order:flex">
+                                    <button onClick={() => {
+                                        // Bring forward
+                                        const idx = elements.findIndex(e => e.id === contextMenu.elementId);
+                                        if (idx < elements.length - 1) {
+                                            const newEls = [...elements];
+                                            [newEls[idx], newEls[idx + 1]] = [newEls[idx + 1], newEls[idx]];
+                                            setElements(newEls);
+                                            emitElements(newEls);
+                                        }
+                                    }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                        <span>Bring forward</span> <span className="ml-auto text-muted-foreground">Ctrl ]</span>
+                                    </button>
+                                    <button onClick={() => {
+                                        // Send backward
+                                        const idx = elements.findIndex(e => e.id === contextMenu.elementId);
+                                        if (idx > 0) {
+                                            const newEls = [...elements];
+                                            [newEls[idx], newEls[idx - 1]] = [newEls[idx - 1], newEls[idx]];
+                                            setElements(newEls);
+                                            emitElements(newEls);
+                                        }
+                                    }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                        <span>Send backward</span> <span className="ml-auto text-muted-foreground">Ctrl [</span>
+                                    </button>
+                                    <button onClick={() => {
+                                        // Bring to front
+                                        const newEls = elements.filter(e => e.id !== contextMenu.elementId);
+                                        const el = elements.find(e => e.id === contextMenu.elementId);
+                                        if (el) {
+                                            newEls.push(el);
+                                            setElements(newEls);
+                                            emitElements(newEls);
+                                        }
+                                    }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                        <span>Bring to front</span> <span className="ml-auto text-muted-foreground">]</span>
+                                    </button>
+                                    <button onClick={() => {
+                                        // Send to back
+                                        const newEls = elements.filter(e => e.id !== contextMenu.elementId);
+                                        const el = elements.find(e => e.id === contextMenu.elementId);
+                                        if (el) {
+                                            newEls.unshift(el);
+                                            setElements(newEls);
+                                            emitElements(newEls);
+                                        }
+                                    }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                        <span>Send to back</span> <span className="ml-auto text-muted-foreground">[</span>
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
                         <div className="h-px bg-border my-1" />
 
-                        <button onClick={deleteSelected} className="flex items-center gap-2 p-2 hover:bg-red-500/10 text-red-500 rounded text-xs text-left">
+                        <button
+                            onClick={deleteSelected}
+                            disabled={!contextMenu.elementId}
+                            className={`flex items-center gap-2 p-2 rounded text-xs text-left ${!contextMenu.elementId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-500/10 text-red-500'}`}
+                        >
                             <Trash2 size={14} /> <span>Delete</span> <span className="ml-auto">Del</span>
                         </button>
 
