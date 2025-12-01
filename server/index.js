@@ -33,11 +33,13 @@ const authRoute = require('./routes/auth');
 const boardRoute = require('./routes/boards');
 const uploadRoute = require('./routes/upload');
 const userRoute = require('./routes/users');
+const iconRoute = require('./routes/icons');
 
 app.use('/api/auth', authRoute);
 app.use('/api/boards', boardRoute);
 app.use('/api/upload', uploadRoute);
 app.use('/api/users', userRoute);
+app.use('/api/icons', iconRoute);
 
 mongoose.connect(config.MONGODB_URI)
     .then(() => console.log('MongoDB connected'))
@@ -89,7 +91,7 @@ io.on('connection', (socket) => {
             const board = await Board.findById(boardId);
             if (!board) return;
 
-            
+
             const userId = socket.user ? socket.user.id : null;
             const isOwner = userId && board.user.toString() === userId;
             const isEditor = userId && board.editors.some(id => id.toString() === userId);
