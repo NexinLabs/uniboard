@@ -9,18 +9,28 @@ import {
     Clock,
     MoreVertical,
     Star,
+    Trash2,
     Grid,
     List,
     FilePlus,
     Activity
 } from 'lucide-react';
 import { motion } from 'framer-motion';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
 
 const Dashboard = () => {
     const { user } = useContext(AuthContext);
     const [boards, setBoards] = useState<any[]>([]);
     const [searchQuery, setSearchQuery] = useState("");
     const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+    const [activeMenu, setActiveMenu] = useState<string | null>(null);
+
+    // State for delete confirmation dialog
+    const [deleteDialog, setDeleteDialog] = useState<{ isOpen: boolean; boardId: string | null }>({
+        isOpen: false,
+        boardId: null
+    });
+
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -39,6 +49,12 @@ const Dashboard = () => {
         fetchBoards();
     }, [user, navigate]);
 
+    useEffect(() => {
+        const handleClickOutside = () => setActiveMenu(null);
+        document.addEventListener('click', handleClickOutside);
+        return () => document.removeEventListener('click', handleClickOutside);
+    }, []);
+
     const handleCreate = async () => {
         if (!user) {
             alert("You must be logged in to create a board.");
@@ -55,6 +71,25 @@ const Dashboard = () => {
         } catch (err) {
             console.error("Error creating board:", err);
             alert("Failed to create board.");
+        }
+    };
+
+    const handleDeleteClick = (e: React.MouseEvent, boardId: string) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setActiveMenu(null);
+        setDeleteDialog({ isOpen: true, boardId });
+    };
+
+    const handleConfirmDelete = async () => {
+        if (!deleteDialog.boardId) return;
+
+        try {
+            await api.delete(`/api/boards/${deleteDialog.boardId}`);
+            setBoards(prev => prev.filter(b => b._id !== deleteDialog.boardId));
+        } catch (err) {
+            console.error("Failed to delete board:", err);
+            alert("Failed to delete board");
         }
     };
 
@@ -85,7 +120,7 @@ const Dashboard = () => {
                 <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
                         <h1 className="text-4xl font-bold bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-transparent">
-                            Welcome back, {user?.name || 'Creator'}
+                            Welcome back, {user?.displayName || 'Creator'}
                         </h1>
                         <p className="text-muted-foreground mt-2 text-lg">
                             Ready to create something amazing today?
@@ -171,9 +206,9 @@ const Dashboard = () => {
                                 className="group cursor-pointer p-4 rounded-xl border border-border bg-card hover:border-primary/50 transition-all hover:-translate-y-1"
                             >
                                 <div className={`aspect-video rounded-lg mb-3 ${i === 0 ? 'bg-gradient-to-br from-gray-800 to-gray-900' :
-                                        i === 1 ? 'bg-gradient-to-br from-blue-900/50 to-indigo-900/50' :
-                                            i === 2 ? 'bg-gradient-to-br from-emerald-900/50 to-teal-900/50' :
-                                                'bg-gradient-to-br from-purple-900/50 to-pink-900/50'
+                                    i === 1 ? 'bg-gradient-to-br from-blue-900/50 to-indigo-900/50' :
+                                        i === 2 ? 'bg-gradient-to-br from-emerald-900/50 to-teal-900/50' :
+                                            'bg-gradient-to-br from-purple-900/50 to-pink-900/50'
                                     } flex items-center justify-center`}>
                                     {i === 0 && <Plus className="w-8 h-8 text-muted-foreground group-hover:text-foreground transition-colors" />}
                                 </div>
@@ -244,54 +279,102 @@ const Dashboard = () => {
                             }
                         >
                             {filteredBoards.map((board: any, index) => (
-                                <Link to={`/board/${board._id}`} key={board._id}>
-                                    <motion.div
-                                        variants={item}
-                                        className={`group relative bg-card border border-border rounded-xl overflow-hidden hover:border-primary/50 hover:shadow-lg transition-all ${viewMode === 'list' ? 'flex items-center p-4 gap-6' : 'flex flex-col h-full'
-                                            }`}
-                                    >
-                                        {/* Thumbnail/Preview Area */}
-                                        <div className={`${viewMode === 'list' ? 'w-16 h-16 rounded-lg' : 'h-40 w-full'
-                                            } bg-gradient-to-br from-secondary to-secondary/50 group-hover:scale-105 transition-transform duration-500 relative overflow-hidden`}>
-                                            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
-                                                <span className="text-white text-xs font-medium px-3 py-1 rounded-full bg-black/50 backdrop-blur-sm">
-                                                    Open Board
-                                                </span>
-                                            </div>
+                                <motion.div
+                                    key={board._id}
+                                    variants={item}
+                                    onClick={() => navigate(`/board/${board._id}`)}
+                                    style={{ zIndex: activeMenu === board._id ? 50 : 1 }}
+                                    className={`group relative bg-card border border-border rounded-xl hover:border-primary/50 hover:shadow-lg transition-all cursor-pointer ${viewMode === 'list' ? 'flex items-center p-4 gap-6' : 'flex flex-col h-full'
+                                        }`}
+                                >
+                                    {/* Thumbnail/Preview Area */}
+                                    <div className={`${viewMode === 'list' ? 'w-16 h-16 rounded-lg' : 'h-40 w-full rounded-t-xl'
+                                        } relative overflow-hidden bg-secondary/20`}>
+                                        {/* Animated Background Layer */}
+                                        <div className={`absolute inset-0 bg-gradient-to-br from-secondary to-secondary/50 group-hover:scale-105 transition-transform duration-500`}>
                                             {/* Random decorative element */}
                                             <div className={`absolute -bottom-4 -right-4 w-24 h-24 rounded-full blur-2xl opacity-20 ${['bg-blue-500', 'bg-purple-500', 'bg-emerald-500', 'bg-orange-500'][index % 4]
                                                 }`} />
                                         </div>
 
-                                        {/* Content Area */}
-                                        <div className={`flex-1 ${viewMode === 'grid' ? 'p-5' : ''}`}>
-                                            <div className="flex justify-between items-start mb-2">
-                                                <h3 className="font-semibold text-lg truncate pr-4 group-hover:text-primary transition-colors">
-                                                    {board.title}
-                                                </h3>
-                                                <button className="opacity-0 group-hover:opacity-100 p-1 hover:bg-secondary rounded transition-all">
+                                        {/* Overlay Content */}
+                                        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+                                            <span className="text-white text-xs font-medium px-3 py-1 rounded-full bg-black/50 backdrop-blur-sm">
+                                                Open Board
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {/* Content Area */}
+                                    <div className={`flex-1 ${viewMode === 'grid' ? 'p-5' : ''}`}>
+                                        <div className="flex justify-between items-start mb-2 relative">
+                                            <h3 className="font-semibold text-lg truncate pr-4 group-hover:text-primary transition-colors">
+                                                {board.title}
+                                            </h3>
+
+                                            <div className="relative">
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setActiveMenu(activeMenu === board._id ? null : board._id);
+                                                    }}
+                                                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-secondary rounded transition-all"
+                                                >
                                                     <MoreVertical className="w-4 h-4 text-muted-foreground" />
                                                 </button>
-                                            </div>
 
-                                            <div className="flex items-center gap-4 text-xs text-muted-foreground mt-auto">
-                                                <div className="flex items-center gap-1">
-                                                    <Clock className="w-3 h-3" />
-                                                    {new Date(board.createdAt).toLocaleDateString()}
-                                                </div>
-                                                <div className="flex items-center gap-1">
-                                                    <Activity className="w-3 h-3" />
-                                                    Edited 2m ago
-                                                </div>
+                                                {activeMenu === board._id && (
+                                                    <div
+                                                        className="absolute right-0 top-full mt-1 w-32 bg-popover border border-border rounded-lg shadow-xl z-20 py-1 cursor-default"
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    >
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                navigate(`/board/${board._id}`);
+                                                            }}
+                                                            className="w-full text-left px-3 py-2 text-sm hover:bg-secondary flex items-center gap-2 cursor-pointer"
+                                                        >
+                                                            <Layout className="w-4 h-4" /> Open
+                                                        </button>
+                                                        <button
+                                                            onClick={(e) => handleDeleteClick(e, board._id)}
+                                                            className="w-full text-left px-3 py-2 text-sm hover:bg-red-500/10 text-red-500 flex items-center gap-2 cursor-pointer"
+                                                        >
+                                                            <Trash2 className="w-4 h-4" /> Delete
+                                                        </button>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
-                                    </motion.div>
-                                </Link>
+
+                                        <div className="flex items-center gap-4 text-xs text-muted-foreground mt-auto">
+                                            <div className="flex items-center gap-1">
+                                                <Clock className="w-3 h-3" />
+                                                {new Date(board.createdAt).toLocaleDateString()}
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <Activity className="w-3 h-3" />
+                                                Edited 2m ago
+                                            </div>
+                                        </div>
+                                    </div>
+                                </motion.div>
                             ))}
                         </motion.div>
                     )}
                 </section>
             </div>
+
+            <ConfirmDialog
+                isOpen={deleteDialog.isOpen}
+                onClose={() => setDeleteDialog({ ...deleteDialog, isOpen: false })}
+                onConfirm={handleConfirmDelete}
+                title="Delete Board"
+                message="Are you sure you want to delete this board? This action cannot be undone."
+                type="danger"
+                confirmText="Delete Board"
+            />
         </div>
     );
 };
