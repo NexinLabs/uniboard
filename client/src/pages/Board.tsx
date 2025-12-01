@@ -1,15 +1,16 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
-import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
+import { appConfig } from '../config';
+import api from '../utils/api';
 import {
     Square, Circle, Type, Trash2, MousePointer,
     ArrowRight, Hand,
     Minus, CornerDownRight, Activity, ArrowLeft, ArrowLeftRight,
-    Plus, Sparkles, Frame, Search, AlignLeft, AlignCenter, AlignRight,
+    Plus, Search, AlignLeft, AlignCenter, AlignRight,
     Layers, Eye, EyeOff, Copy, Scissors, Clipboard, MoreHorizontal,
-    BringToFront, SendToBack, Group, Download
+    BringToFront, Download
 } from 'lucide-react';
 
 type Tool = 'select' | 'rect' | 'circle' | 'text' | 'image' | 'arrow' | 'line' | 'draw' | 'frame' | 'pan';
@@ -269,13 +270,13 @@ const Board = () => {
         }
     };
 
+
+
     useEffect(() => {
         const fetchBoard = async () => {
             if (!user) return;
             try {
-                const res = await axios.get(`http://localhost:5000/api/boards/${id}`, {
-                    headers: { token: "Bearer " + user.token },
-                });
+                const res = await api.get(`/api/boards/${id}`);
                 const loadedElements = res.data.elements || [];
                 setElements(loadedElements);
                 setHistory([loadedElements]);
@@ -289,7 +290,7 @@ const Board = () => {
         // Setup Socket.IO connection
         if (!socketRef.current && id) {
             console.log('Connecting to Socket.IO...');
-            socketRef.current = io('http://localhost:5000');
+            socketRef.current = io(appConfig.API_URL);
 
             // Join the board room
             socketRef.current.emit('join-board', id);
@@ -1455,7 +1456,7 @@ const Board = () => {
         formData.append('image', file);
 
         try {
-            const res = await axios.post('http://localhost:5000/api/upload', formData, {
+            const res = await api.post('/api/upload', formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data'
                 }
@@ -1754,7 +1755,7 @@ const Board = () => {
     }, []); // Empty dependency array to prevent re-binding
 
     return (
-        <div className="h-[calc(100vh-80px)] bg-gray-950 rounded-lg border border-border relative overflow-hidden flex">
+        <div className="h-[calc(100vh-80px)] bg-zinc-900 rounded-lg border border-border relative overflow-hidden flex">
             <div className="absolute top-4 left-4 flex flex-col gap-2 z-10">
                 {/* Top Group */}
                 <div className="bg-card border border-border rounded-lg p-1 flex flex-col gap-1 shadow-lg">
@@ -2117,7 +2118,7 @@ const Board = () => {
                                         style={{ backgroundColor: elements.find(el => el.id === selectedElements[0])?.backgroundColor || 'transparent' }}
                                     />
                                 </button>
-                                <div className="absolute bottom-full left-0 mb-0  group-hover:block bg-card p-2 rounded border border-border shadow-lg flex flex-col gap-2">
+                                <div className="absolute bottom-full left-0 mb-0 hidden group-hover:block bg-card p-2 rounded border border-border shadow-lg flex flex-col gap-2">
                                     <div className="flex items-center gap-2">
                                         <span className="text-xs">Fill:</span>
                                         <input
