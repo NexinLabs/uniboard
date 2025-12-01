@@ -91,6 +91,7 @@ const Dashboard = () => {
             console.error("Failed to delete board:", err);
             alert("Failed to delete board");
         }
+        setDeleteDialog({ isOpen: false, boardId: null });
     };
 
     const filteredBoards = boards.filter(board =>
