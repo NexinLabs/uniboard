@@ -2,7 +2,7 @@
 
 import type { Element, ResizeHandle, ResizeHandlePosition } from './types';
 import { distanceToSegment, distanceToBezier } from './geometry';
-import { getConnectionPoints, getArrowPoints } from './arrows';
+import { getArrowPoints } from './arrows';
 
 /**
  * Get resize handles for an element
@@ -198,4 +198,39 @@ export function getElementsInSelectionBox(
             return false;
         })
         .map(el => el.id);
+}
+
+/**
+ * Change the shape of selected elements
+ */
+export function changeElementShape(elements: Element[], selectedIds: string[], newType: 'rect' | 'circle'): Element[] {
+    return elements.map(el => {
+        if (selectedIds.includes(el.id)) {
+            if (el.type === newType) return el;
+            const updates: Partial<Element> = { type: newType };
+            if (newType === 'circle' && el.type === 'rect') {
+                const size = Math.min(el.w || 50, el.h || 50);
+                updates.radius = size / 2;
+                updates.x = el.x + (el.w || 0) / 2;
+                updates.y = el.y + (el.h || 0) / 2;
+            } else if (newType === 'rect' && el.type === 'circle') {
+                const r = el.radius || 25;
+                updates.w = r * 2;
+                updates.h = r * 2;
+                updates.x = el.x - r;
+                updates.y = el.y - r;
+            }
+            return { ...el, ...updates };
+        }
+        return el;
+    });
+}
+
+/**
+ * Toggle visibility of an element
+ */
+export function toggleElementVisibility(elements: Element[], id: string): Element[] {
+    return elements.map(el =>
+        el.id === id ? { ...el, isHidden: !el.isHidden } : el
+    );
 }

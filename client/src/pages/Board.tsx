@@ -11,111 +11,51 @@ import {
     Search, AlignLeft, AlignCenter, AlignRight,
     Layers, Eye, EyeOff, Copy, Scissors, Clipboard,
     BringToFront, Download,
-    Share2, Menu, User, LayoutDashboard, LogOut, X, Globe, Lock, Image
+    Share2, Menu, User, LayoutDashboard, LogOut, X, Globe, Lock, Image, MoreVertical
 } from 'lucide-react';
 
-type Tool = 'select' | 'rect' | 'circle' | 'text' | 'image' | 'arrow' | 'line' | 'frame' | 'pan';
+// Import types and utilities from modular board utilities
+import type {
+    Tool,
+    Element,
+    ConnectionPoint,
+    ResizeHandle,
+} from '../utils/board/types';
 
-interface ConnectionPoint {
-    x: number;
-    y: number;
-    position: 'top' | 'right' | 'bottom' | 'left';
-}
+import {
+    // Arrow utilities
+    getArrowHandles,
+    getConnectionPointAtPosition,
 
-interface Element {
-    id: string;
-    type: 'rect' | 'circle' | 'text' | 'image' | 'arrow';
-    x: number;
-    y: number;
-    w?: number;
-    h?: number;
-    radius?: number;
-    text?: string;
-    imageUrl?: string;
-    color?: string;
-    fromId?: string;
-    toId?: string;
-    fromPoint?: ConnectionPoint;
-    toPoint?: ConnectionPoint;
-    startPoint?: { x: number, y: number };
-    endPoint?: { x: number, y: number };
-    fontSize?: number;
-    fontFamily?: string;
-    textAlign?: 'center' | 'left' | 'right';
-    arrowType?: 'straight' | 'elbow' | 'curved';
-    lineStyle?: 'solid' | 'dashed' | 'dotted';
-    lineWidth?: number;
-    arrowHead?: 'none' | 'start' | 'end' | 'both';
-    backgroundColor?: string;
-    opacity?: number;
-    strokeWidth?: number;
-    textColor?: string;
-    textWrap?: boolean;
-    controlPoint?: { x: number, y: number };
-    isHidden?: boolean;
-    isLocked?: boolean;
-}
+    // Element utilities
+    getResizeHandles,
+    getCursorForHandle,
+    getElementAtPosition as getElementAtPos,
+    updateElements,
+    deleteElements as deleteElementsUtil,
+    changeElementShape,
+    toggleElementVisibility,
 
-const distanceToSegment = (p: { x: number, y: number }, a: { x: number, y: number }, b: { x: number, y: number }) => {
-    const A = p.x - a.x;
-    const B = p.y - a.y;
-    const C = b.x - a.x;
-    const D = b.y - a.y;
+    // History utilities
+    addToHistory as addToHistoryUtil,
 
-    const dot = A * C + B * D;
-    const lenSq = C * C + D * D;
-    let param = -1;
-    if (lenSq !== 0) param = dot / lenSq;
+    // Clipboard utilities
+    copyElements,
+    cutElements,
+    pasteElements,
 
-    let xx, yy;
+    // Image utilities
+    uploadImage as uploadImageUtil,
 
-    if (param < 0) {
-        xx = a.x;
-        yy = a.y;
-    } else if (param > 1) {
-        xx = b.x;
-        yy = b.y;
-    } else {
-        xx = a.x + param * C;
-        yy = a.y + param * D;
-    }
+    // Canvas utilities
+    drawRoundedRect,
+    drawArrow,
+    drawConnectionPoints,
+    drawText,
 
-    const dx = p.x - xx;
-    const dy = p.y - yy;
-    return Math.sqrt(dx * dx + dy * dy);
-};
-
-const distanceToBezier = (p: { x: number, y: number }, p0: { x: number, y: number }, p1: { x: number, y: number }, p2: { x: number, y: number }, p3: { x: number, y: number }) => {
-    let minDst = Infinity;
-    for (let t = 0; t <= 1; t += 0.05) {
-        const x = Math.pow(1 - t, 3) * p0.x + 3 * Math.pow(1 - t, 2) * t * p1.x + 3 * (1 - t) * t * t * p2.x + t * t * t * p3.x;
-        const y = Math.pow(1 - t, 3) * p0.y + 3 * Math.pow(1 - t, 2) * t * p1.y + 3 * (1 - t) * t * t * p2.y + t * t * t * p3.y;
-        const d = Math.sqrt(Math.pow(p.x - x, 2) + Math.pow(p.y - y, 2));
-        if (d < minDst) minDst = d;
-    }
-    return minDst;
-};
-
-const getWrappedLines = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
-    const words = text.split(' ');
-    let lines = [];
-    let currentLine = words[0];
-
-    for (let i = 1; i < words.length; i++) {
-        const word = words[i];
-        const width = ctx.measureText(currentLine + " " + word).width;
-        if (width < maxWidth) {
-            currentLine += " " + word;
-        } else {
-            lines.push(currentLine);
-            currentLine = word;
-        }
-    }
-    lines.push(currentLine);
-    return lines;
-};
-
-type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+    // Socket utilities
+    emitElements as emitElementsUtil,
+} from '../utils/board';
 
 const Board = () => {
     const { id } = useParams();
@@ -130,7 +70,6 @@ const Board = () => {
     const [history, setHistory] = useState<Element[][]>([[]]);
     const [historyIndex, setHistoryIndex] = useState(0);
     const [selectedElements, setSelectedElements] = useState<string[]>([]);
-    const [clipboard, setClipboard] = useState<Element[]>([]);
     const [currentColor] = useState('#ffffff');
     const [showPropertiesPanel, setShowPropertiesPanel] = useState(false);
 
@@ -162,123 +101,7 @@ const Board = () => {
     const [showMenuDropdown, setShowMenuDropdown] = useState(false);
     const [inviteEmail, setInviteEmail] = useState('');
     const [inviteRole, setInviteRole] = useState<'viewer' | 'editor'>('viewer');
-
-    const getArrowHandles = (el: Element): { type: 'start' | 'end' | 'control', x: number, y: number }[] => {
-        if (el.type !== 'arrow') return [];
-        const handles: { type: 'start' | 'end' | 'control', x: number, y: number }[] = [];
-
-        let fromPoint = el.startPoint;
-        let toPoint = el.endPoint;
-
-        if (el.fromId && el.fromPoint) {
-            const fromEl = elements.find(e => e.id === el.fromId);
-            if (fromEl) {
-                const fromPoints = getConnectionPoints(fromEl);
-                fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
-            }
-        }
-
-        if (el.toId && el.toPoint) {
-            const toEl = elements.find(e => e.id === el.toId);
-            if (toEl) {
-                const toPoints = getConnectionPoints(toEl);
-                toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
-            }
-        }
-
-        if (fromPoint) handles.push({ type: 'start', x: fromPoint.x, y: fromPoint.y });
-        if (toPoint) handles.push({ type: 'end', x: toPoint.x, y: toPoint.y });
-
-        if (el.arrowType === 'elbow' && fromPoint && toPoint) {
-            const points = getArrowPoints(el);
-            // We want the handle on the "middle" segment.
-            // getArrowPoints returns [Start, P1, P2, End] for Z-shape.
-            // Middle segment is P1 -> P2.
-            if (points.length >= 3) {
-                // If 4 points: S -> P1 -> P2 -> E. Middle is P1-P2.
-                // If 3 points (aligned): S -> P1 -> E. Middle is P1-E? No, usually 4 points for elbow unless aligned.
-
-                // Let's stick to the previous logic for handle placement as it was robust enough
-                // But we can use the points to be sure.
-
-                // Actually, the previous logic was:
-                // if vertical start: handle at (midX, midY) where midX is variable, midY is fixed?
-                // No, if vertical start: S -> (S.x, midY) -> (E.x, midY) -> E.
-                // The middle segment is horizontal: y = midY.
-                // We want to drag it vertically? No, we drag the horizontal segment up/down.
-                // So handle should be at ((S.x + E.x)/2, midY).
-
-                let midX = (fromPoint.x + toPoint.x) / 2;
-                let midY = (fromPoint.y + toPoint.y) / 2;
-
-                if (el.controlPoint) {
-                    midX = el.controlPoint.x;
-                    midY = el.controlPoint.y;
-                }
-
-                const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
-
-                if (isVerticalStart) {
-                    // Middle segment is horizontal at y=midY. We drag it up/down.
-                    // Handle should be at center of that segment.
-                    // Segment is from (fromPoint.x, midY) to (toPoint.x, midY).
-                    handles.push({ type: 'control', x: (fromPoint.x + toPoint.x) / 2, y: midY });
-                } else {
-                    // Middle segment is vertical at x=midX. We drag it left/right.
-                    handles.push({ type: 'control', x: midX, y: (fromPoint.y + toPoint.y) / 2 });
-                }
-            }
-        }
-
-        return handles;
-    };
-
-    const getResizeHandles = (el: Element): { type: ResizeHandle, x: number, y: number }[] => {
-        if (el.type === 'rect' || el.type === 'image') {
-            const x = el.x;
-            const y = el.y;
-            const w = el.w || 0;
-            const h = el.h || 0;
-            return [
-                { type: 'nw', x, y },
-                { type: 'n', x: x + w / 2, y },
-                { type: 'ne', x: x + w, y },
-                { type: 'e', x: x + w, y: y + h / 2 },
-                { type: 'se', x: x + w, y: y + h },
-                { type: 's', x: x + w / 2, y: y + h },
-                { type: 'sw', x, y: y + h },
-                { type: 'w', x, y: y + h / 2 },
-            ];
-        } else if (el.type === 'circle') {
-            const r = el.radius || 0;
-            const x = el.x - r;
-            const y = el.y - r;
-            const w = r * 2;
-            const h = r * 2;
-            return [
-                { type: 'nw', x, y },
-                { type: 'ne', x: x + w, y },
-                { type: 'se', x: x + w, y: y + h },
-                { type: 'sw', x, y: y + h },
-            ];
-        }
-        return [];
-    };
-
-    const getCursorForHandle = (handle: ResizeHandle) => {
-        switch (handle) {
-            case 'nw': return 'nw-resize';
-            case 'n': return 'n-resize';
-            case 'ne': return 'ne-resize';
-            case 'e': return 'e-resize';
-            case 'se': return 'se-resize';
-            case 's': return 's-resize';
-            case 'sw': return 'sw-resize';
-            case 'w': return 'w-resize';
-            default: return 'default';
-        }
-    };
-
+    const [activeCollaboratorMenu, setActiveCollaboratorMenu] = useState<string | null>(null);
 
 
     useEffect(() => {
@@ -290,7 +113,12 @@ const Board = () => {
                 setElements(loadedElements);
                 setBoardTitle(res.data.title || 'Untitled Board');
                 setVisibility(res.data.visibility || 'private');
-                setCollaborators(res.data.collaborators || []);
+
+                // Merge editors and viewers into collaborators state
+                const editors = (res.data.editors || []).map((u: any) => ({ user: u, role: 'editor' }));
+                const viewers = (res.data.viewers || []).map((u: any) => ({ user: u, role: 'viewer' }));
+                setCollaborators([...editors, ...viewers]);
+
                 setOwnerId(res.data.user || null);
                 setHistory([loadedElements]);
                 setHistoryIndex(0);
@@ -302,8 +130,8 @@ const Board = () => {
 
         // Setup Socket.IO connection
         if (!socketRef.current && id) {
-            console.log('Connecting to Socket.IO...');
-            const token = localStorage.getItem('token');
+            console.debug('Connecting to Socket.IO...');
+            const token = user?.token;
             const socket = io(appConfig.API_URL, {
                 auth: { token: `Bearer ${token}` }
             });
@@ -311,21 +139,21 @@ const Board = () => {
 
             // Join the board room
             socket.emit('join-board', id);
-            console.log('Joined board room:', id);
+            console.debug('Joined board room:', id);
 
             // Listen for updates from other users
             socket.on('elements-updated', (updatedElements: Element[]) => {
-                console.log('📡 Received elements update from another user');
+                console.debug('📡 Received elements update from another user');
                 setElements(updatedElements);
                 addToHistory(updatedElements);
             });
 
             socket.on('user-joined', (data: any) => {
-                console.log('👋 User joined:', data.userId);
+                console.debug('👋 User joined:', data.userId);
             });
 
             socket.on('user-left', (data: any) => {
-                console.log('👋 User left:', data.userId);
+                console.debug('👋 User left:', data.userId);
             });
         }
 
@@ -334,7 +162,7 @@ const Board = () => {
                 clearTimeout(saveTimeoutRef.current);
             }
             if (socketRef.current) {
-                console.log('Disconnecting from Socket.IO...');
+                console.debug('Disconnecting from Socket.IO...');
                 socketRef.current.emit('leave-board', id);
                 socketRef.current.disconnect();
                 socketRef.current = null;
@@ -342,24 +170,15 @@ const Board = () => {
         };
     }, [id, user]);
 
-    // Emit changes via Socket.IO ONLY - server handles DB save
-    const emitElements = (elementsToSave: Element[]) => {
-        if (socketRef.current && id) {
-            console.log('📤 Emitting elements via Socket.IO (server will save to DB)');
-            socketRef.current.emit('element-update', {
-                boardId: id,
-                elements: elementsToSave
-            });
-        } else {
-            console.warn('⚠️ Socket not connected, changes not synced!');
-        }
+    const emitElements = (els: Element[]) => {
+        if (!socketRef.current) return;
+        emitElementsUtil(socketRef.current, id!, els);
     };
 
-    const addToHistory = (newElements: Element[]) => {
-        const newHistory = history.slice(0, historyIndex + 1);
-        newHistory.push(newElements);
+    const addToHistory = (els: Element[]) => {
+        const { history: newHistory, historyIndex: newIndex } = addToHistoryUtil(history, historyIndex, els);
         setHistory(newHistory);
-        setHistoryIndex(newHistory.length - 1);
+        setHistoryIndex(newIndex);
     };
 
     const undo = () => {
@@ -380,106 +199,72 @@ const Board = () => {
         }
     };
 
-    const getConnectionPoints = (el: Element): ConnectionPoint[] => {
-        if (el.type === 'rect' || el.type === 'image') {
-            const x = el.x;
-            const y = el.y;
-            const w = el.w || (el.type === 'image' ? 200 : 0);
-            const h = el.h || (el.type === 'image' ? 200 : 0);
-            const centerX = x + w / 2;
-            const centerY = y + h / 2;
-            return [
-                { x: centerX, y: y, position: 'top' },
-                { x: x + w, y: centerY, position: 'right' },
-                { x: centerX, y: y + h, position: 'bottom' },
-                { x: x, y: centerY, position: 'left' },
-            ];
-        } else if (el.type === 'circle') {
-            const r = el.radius || 0;
-            return [
-                { x: el.x, y: el.y - r, position: 'top' },
-                { x: el.x + r, y: el.y, position: 'right' },
-                { x: el.x, y: el.y + r, position: 'bottom' },
-                { x: el.x - r, y: el.y, position: 'left' },
-            ];
-        }
-        return [];
+    const isReadOnly = () => {
+        if (!user || !ownerId) return true; // Loading or not logged in
+        if (user._id === ownerId) return false; // Owner
+        if (visibility === 'public-edit') return false; // Public Edit
+        const collaborator = collaborators.find(c => {
+            const cUserId = c.user?._id || c.user;
+            return cUserId === user._id;
+        });
+        if (collaborator && collaborator.role === 'editor') return false; // Editor
+        return true; // Everyone else (viewer, public-view, private)
     };
 
-    const getArrowPoints = (el: Element): { x: number, y: number }[] => {
-        let fromPoint = el.startPoint;
-        let toPoint = el.endPoint;
+    const handleRemoveCollaborator = async (userId: string) => {
+        if (isReadOnly()) return;
+        const previousCollaborators = [...collaborators];
+        const newCollaborators = collaborators.filter(c => (c.user?._id || c.user) !== userId);
 
-        if (el.fromId && el.fromPoint) {
-            const fromEl = elements.find(e => e.id === el.fromId);
-            if (fromEl) {
-                const fromPoints = getConnectionPoints(fromEl);
-                fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
-            }
+        setCollaborators(newCollaborators);
+        setActiveCollaboratorMenu(null);
+
+        try {
+            const res = await api.delete(`/api/boards/${id}/collaborators/${userId}`);
+            // Sync with server response
+            const editors = (res.data.editors || []).map((u: any) => ({ user: u, role: 'editor' }));
+            const viewers = (res.data.viewers || []).map((u: any) => ({ user: u, role: 'viewer' }));
+            setCollaborators([...editors, ...viewers]);
+        } catch (error) {
+            console.error("Failed to remove collaborator", error);
+            setCollaborators(previousCollaborators);
         }
-
-        if (el.toId && el.toPoint) {
-            const toEl = elements.find(e => e.id === el.toId);
-            if (toEl) {
-                const toPoints = getConnectionPoints(toEl);
-                toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
-            }
-        }
-
-        if (!fromPoint || !toPoint) return [];
-
-        const points: { x: number, y: number }[] = [{ x: fromPoint.x, y: fromPoint.y }];
-
-        if (el.arrowType === 'elbow') {
-            let midX = (fromPoint.x + toPoint.x) / 2;
-            let midY = (fromPoint.y + toPoint.y) / 2;
-
-            if (el.controlPoint) {
-                midX = el.controlPoint.x;
-                midY = el.controlPoint.y;
-            }
-
-            const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
-            const isVerticalEnd = el.toPoint?.position === 'top' || el.toPoint?.position === 'bottom';
-
-            if (el.toPoint?.position && !el.controlPoint && isVerticalStart !== isVerticalEnd) {
-                if (isVerticalStart) {
-                    points.push({ x: fromPoint.x, y: toPoint.y });
-                } else {
-                    points.push({ x: toPoint.x, y: fromPoint.y });
-                }
-            } else {
-                if (isVerticalStart) {
-                    points.push({ x: fromPoint.x, y: midY });
-                    points.push({ x: toPoint.x, y: midY });
-                } else {
-                    points.push({ x: midX, y: fromPoint.y });
-                    points.push({ x: midX, y: toPoint.y });
-                }
-            }
-        }
-
-        points.push({ x: toPoint.x, y: toPoint.y });
-        return points;
     };
 
-    const drawRoundedPath = (ctx: CanvasRenderingContext2D, points: { x: number, y: number }[], radius: number) => {
-        if (points.length < 2) return;
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
+    const handleUpdateCollaboratorRole = async (userId: string, newRole: 'viewer' | 'editor') => {
+        if (isReadOnly()) return;
+        const previousCollaborators = [...collaborators];
+        const newCollaborators = collaborators.map(c => {
+            if ((c.user?._id || c.user) === userId) {
+                return { ...c, role: newRole };
+            }
+            return c;
+        });
 
-        for (let i = 1; i < points.length - 1; i++) {
-            const p0 = points[i - 1];
-            const p1 = points[i];
-            const p2 = points[i + 1];
-            const dist1 = Math.max(Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y));
-            const dist2 = Math.max(Math.abs(p2.x - p1.x), Math.abs(p2.y - p1.y));
-            const r = Math.min(radius, dist1 / 2, dist2 / 2);
-            ctx.arcTo(p1.x, p1.y, p2.x, p2.y, r);
+        setCollaborators(newCollaborators);
+        setActiveCollaboratorMenu(null);
+
+        try {
+            const res = await api.put(`/api/boards/${id}/collaborators/${userId}`, { role: newRole });
+            // Sync with server response
+            const editors = (res.data.editors || []).map((u: any) => ({ user: u, role: 'editor' }));
+            const viewers = (res.data.viewers || []).map((u: any) => ({ user: u, role: 'viewer' }));
+            setCollaborators([...editors, ...viewers]);
+        } catch (error) {
+            console.error("Failed to update role", error);
+            setCollaborators(previousCollaborators);
         }
+    };
 
-        ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-        ctx.stroke();
+    const getCanvasCoords = (e: React.MouseEvent) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return { x: 0, y: 0 };
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: (e.clientX - rect.left - panOffset.x) / zoom,
+            y: (e.clientY - rect.top - panOffset.y) / zoom
+        };
+
     };
 
     useEffect(() => {
@@ -498,194 +283,18 @@ const Board = () => {
             const isSelected = selectedElements.includes(el.id);
 
             if (el.type === 'arrow') {
-                const fromEl = elements.find(e => e.id === el.fromId);
-                const toEl = elements.find(e => e.id === el.toId);
-
-                let fromPoint = el.startPoint;
-                let toPoint = el.endPoint;
-
-                if (fromEl && el.fromPoint) {
-                    const fromPoints = getConnectionPoints(fromEl);
-                    fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
-                }
-
-                if (toEl && el.toPoint) {
-                    const toPoints = getConnectionPoints(toEl);
-                    toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
-                }
-
-                if (!fromPoint || !toPoint) return;
-
-                ctx.strokeStyle = el.color || 'white';
-                ctx.lineWidth = (el.lineWidth || 2) + (selectedElements.includes(el.id) ? 1 : 0);
-
-                if (el.lineStyle === 'dashed') ctx.setLineDash([10, 5]);
-                else if (el.lineStyle === 'dotted') ctx.setLineDash([2, 4]);
-                else ctx.setLineDash([]);
-
-                let endAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x);
-
-                if (el.arrowType === 'elbow') {
-                    const points = getArrowPoints(el);
-                    drawRoundedPath(ctx, points, 12); // Radius 12
-
-                    if (points.length >= 2) {
-                        const pLast = points[points.length - 1];
-                        const pPrev = points[points.length - 2];
-                        endAngle = Math.atan2(pLast.y - pPrev.y, pLast.x - pPrev.x);
-                    }
-                } else if (el.arrowType === 'curved') {
-                    const dist = Math.sqrt(Math.pow(toPoint.x - fromPoint.x, 2) + Math.pow(toPoint.y - fromPoint.y, 2));
-                    const len = Math.max(dist * 0.5, 30);
-
-                    let cp1 = { x: fromPoint.x, y: fromPoint.y };
-                    let cp2 = { x: toPoint.x, y: toPoint.y };
-
-                    if (el.fromPoint?.position) {
-                        switch (el.fromPoint.position) {
-                            case 'top': cp1.y -= len; break;
-                            case 'bottom': cp1.y += len; break;
-                            case 'left': cp1.x -= len; break;
-                            case 'right': cp1.x += len; break;
-                        }
-                    } else {
-                        cp1.x += (toPoint.x - fromPoint.x) / 2;
-                    }
-
-                    if (el.toPoint?.position) {
-                        switch (el.toPoint.position) {
-                            case 'top': cp2.y -= len; break;
-                            case 'bottom': cp2.y += len; break;
-                            case 'left': cp2.x -= len; break;
-                            case 'right': cp2.x += len; break;
-                        }
-                    } else {
-                        cp2.x -= (toPoint.x - fromPoint.x) / 2;
-                    }
-
-                    ctx.beginPath();
-                    ctx.moveTo(fromPoint.x, fromPoint.y);
-                    ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, toPoint.x, toPoint.y);
-                    ctx.stroke();
-                    endAngle = Math.atan2(toPoint.y - cp2.y, toPoint.x - cp2.x);
-                } else {
-                    ctx.beginPath();
-                    ctx.moveTo(fromPoint.x, fromPoint.y);
-                    ctx.lineTo(toPoint.x, toPoint.y);
-                    ctx.stroke();
-                }
-                ctx.setLineDash([]);
-                const headLength = 15;
-
-                if (el.toPoint?.position) {
-                    switch (el.toPoint.position) {
-                        case 'top': endAngle = Math.PI / 2; break;
-                        case 'bottom': endAngle = -Math.PI / 2; break;
-                        case 'left': endAngle = 0; break;
-                        case 'right': endAngle = Math.PI; break;
-                    }
-                }
-
-                // Draw start arrow head
-                if (el.arrowHead === 'start' || el.arrowHead === 'both') {
-                    let startAngle;
-                    if (el.fromPoint?.position) {
-                        switch (el.fromPoint.position) {
-                            case 'top': startAngle = Math.PI / 2; break;
-                            case 'bottom': startAngle = -Math.PI / 2; break;
-                            case 'left': startAngle = 0; break;
-                            case 'right': startAngle = Math.PI; break;
-                        }
-                    } else if (el.arrowType === 'elbow') {
-                        const points = getArrowPoints(el);
-                        if (points.length >= 2) {
-                            const p0 = points[0];
-                            const p1 = points[1];
-                            startAngle = Math.atan2(p1.y - p0.y, p1.x - p0.x) + Math.PI;
-                        } else {
-                            startAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x) + Math.PI;
-                        }
-                    } else if (el.arrowType === 'curved') {
-                        const dx = toPoint.x - fromPoint.x;
-                        const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
-                        startAngle = Math.atan2(controlPoint1.y - fromPoint.y, controlPoint1.x - fromPoint.x) + Math.PI;
-                    } else {
-                        startAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x) + Math.PI;
-                    }
-
-                    ctx.beginPath();
-                    ctx.moveTo(fromPoint.x, fromPoint.y);
-                    ctx.lineTo(
-                        fromPoint.x - headLength * Math.cos(startAngle - Math.PI / 6),
-                        fromPoint.y - headLength * Math.sin(startAngle - Math.PI / 6)
-                    );
-                    ctx.moveTo(fromPoint.x, fromPoint.y);
-                    ctx.lineTo(
-                        fromPoint.x - headLength * Math.cos(startAngle + Math.PI / 6),
-                        fromPoint.y - headLength * Math.sin(startAngle + Math.PI / 6)
-                    );
-                    ctx.stroke();
-                }
-
-                // Draw end arrow head
-                if (el.arrowHead === 'end' || el.arrowHead === 'both' || !el.arrowHead) {
-                    ctx.beginPath();
-                    ctx.moveTo(toPoint.x, toPoint.y);
-                    ctx.lineTo(
-                        toPoint.x - headLength * Math.cos(endAngle - Math.PI / 6),
-                        toPoint.y - headLength * Math.sin(endAngle - Math.PI / 6)
-                    );
-                    ctx.moveTo(toPoint.x, toPoint.y);
-                    ctx.lineTo(
-                        toPoint.x - headLength * Math.cos(endAngle + Math.PI / 6),
-                        toPoint.y - headLength * Math.sin(endAngle + Math.PI / 6)
-                    );
-                    ctx.stroke();
-                }
+                drawArrow(ctx, el, elements, isSelected);
             } else if (el.type === 'rect') {
                 ctx.globalAlpha = el.opacity || 1;
                 if (el.backgroundColor) {
                     ctx.fillStyle = el.backgroundColor;
-                    const radius = 8;
-                    const x = el.x;
-                    const y = el.y;
-                    const w = el.w || 0;
-                    const h = el.h || 0;
-                    ctx.beginPath();
-                    ctx.moveTo(x + radius, y);
-                    ctx.lineTo(x + w - radius, y);
-                    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-                    ctx.lineTo(x + w, y + h - radius);
-                    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-                    ctx.lineTo(x + radius, y + h);
-                    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-                    ctx.lineTo(x, y + radius);
-                    ctx.quadraticCurveTo(x, y, x + radius, y);
-                    ctx.closePath();
+                    drawRoundedRect(ctx, el.x, el.y, el.w || 0, el.h || 0, 8);
                     ctx.fill();
                 }
-
                 ctx.strokeStyle = el.color || 'white';
                 ctx.lineWidth = (el.strokeWidth || 2) + (isSelected ? 1 : 0);
-                const radius = 8;
-                const x = el.x;
-                const y = el.y;
-                const w = el.w || 0;
-                const h = el.h || 0;
-                ctx.beginPath();
-                ctx.moveTo(x + radius, y);
-                ctx.lineTo(x + w - radius, y);
-                ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-                ctx.lineTo(x + w, y + h - radius);
-                ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-                ctx.lineTo(x + radius, y + h);
-                ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-                ctx.lineTo(x, y + radius);
-                ctx.quadraticCurveTo(x, y, x + radius, y);
-                ctx.closePath();
+                drawRoundedRect(ctx, el.x, el.y, el.w || 0, el.h || 0, 8);
                 ctx.stroke();
-
-                // Reset alpha for text
                 ctx.globalAlpha = 1;
 
                 if (el.text && el.id !== editingElementId) {
@@ -695,37 +304,15 @@ const Board = () => {
                     ctx.textAlign = el.textAlign || 'center';
                     ctx.textBaseline = 'middle';
 
-                    let textX = x + w / 2;
-                    if (el.textAlign === 'left') textX = x + 10;
-                    if (el.textAlign === 'right') textX = x + w - 10;
+                    let textX = el.x + (el.w || 0) / 2;
+                    if (el.textAlign === 'left') textX = el.x + 10;
+                    if (el.textAlign === 'right') textX = el.x + (el.w || 0) - 10;
 
-                    if (el.textWrap) {
-                        const maxWidth = w - 20;
-                        const lines = getWrappedLines(ctx, el.text, maxWidth);
-                        const lineHeight = fontSize * 1.2;
-                        const totalHeight = lines.length * lineHeight;
-                        let startY = y + h / 2 - totalHeight / 2 + lineHeight / 2;
-
-                        lines.forEach((line, i) => {
-                            ctx.fillText(line, textX, startY + i * lineHeight);
-                        });
-                    } else {
-                        ctx.fillText(el.text, textX, y + h / 2);
-                    }
+                    drawText(ctx, el.text, textX, el.y + (el.h || 0) / 2, (el.w || 0) - 20, fontSize, el.textAlign || 'center', el.textWrap || false);
                 }
 
                 if (tool === 'arrow' || isSelected) {
-                    getConnectionPoints(el).forEach(point => {
-                        const isHovered = hoveredConnectionPoint?.elementId === el.id &&
-                            hoveredConnectionPoint?.point.position === point.position;
-                        ctx.fillStyle = isHovered ? '#3b82f6' : '#60a5fa';
-                        ctx.beginPath();
-                        ctx.arc(point.x, point.y, isHovered ? 6 : 4, 0, 2 * Math.PI);
-                        ctx.fill();
-                        ctx.strokeStyle = 'white';
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
-                    });
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
                 }
             } else if (el.type === 'circle') {
                 ctx.globalAlpha = el.opacity || 1;
@@ -756,33 +343,11 @@ const Board = () => {
                     if (el.textAlign === 'left') textX = el.x - (el.radius || 0) + 10;
                     if (el.textAlign === 'right') textX = el.x + (el.radius || 0) - 10;
 
-                    if (el.textWrap) {
-                        const maxWidth = (el.radius || 0) * 2 - 20;
-                        const lines = getWrappedLines(ctx, el.text, maxWidth);
-                        const lineHeight = fontSize * 1.2;
-                        const totalHeight = lines.length * lineHeight;
-                        let startY = el.y - totalHeight / 2 + lineHeight / 2;
-
-                        lines.forEach((line, i) => {
-                            ctx.fillText(line, textX, startY + i * lineHeight);
-                        });
-                    } else {
-                        ctx.fillText(el.text, textX, el.y);
-                    }
+                    drawText(ctx, el.text, textX, el.y, ((el.radius || 0) * 2) - 20, fontSize, el.textAlign || 'center', el.textWrap || false);
                 }
 
                 if (tool === 'arrow' || isSelected) {
-                    getConnectionPoints(el).forEach(point => {
-                        const isHovered = hoveredConnectionPoint?.elementId === el.id &&
-                            hoveredConnectionPoint?.point.position === point.position;
-                        ctx.fillStyle = isHovered ? '#3b82f6' : '#60a5fa';
-                        ctx.beginPath();
-                        ctx.arc(point.x, point.y, isHovered ? 6 : 4, 0, 2 * Math.PI);
-                        ctx.fill();
-                        ctx.strokeStyle = 'white';
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
-                    });
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
                 }
             } else if (el.type === 'text') {
                 ctx.globalAlpha = el.opacity || 1;
@@ -810,17 +375,7 @@ const Board = () => {
                 }
 
                 if (tool === 'arrow' || isSelected) {
-                    getConnectionPoints(el).forEach(point => {
-                        const isHovered = hoveredConnectionPoint?.elementId === el.id &&
-                            hoveredConnectionPoint?.point.position === point.position;
-                        ctx.fillStyle = isHovered ? '#3b82f6' : '#60a5fa';
-                        ctx.beginPath();
-                        ctx.arc(point.x, point.y, isHovered ? 6 : 4, 0, 2 * Math.PI);
-                        ctx.fill();
-                        ctx.strokeStyle = 'white';
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
-                    });
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
                 }
             }
 
@@ -843,7 +398,7 @@ const Board = () => {
         if (selectedElements.length === 1) {
             const el = elements.find(e => e.id === selectedElements[0]);
             if (el && el.type === 'arrow') {
-                const handles = getArrowHandles(el);
+                const handles = getArrowHandles(el, elements);
                 handles.forEach(handle => {
                     ctx.fillStyle = handle.type === 'control' ? '#f59e0b' : 'white';
                     ctx.strokeStyle = '#3b82f6';
@@ -891,20 +446,7 @@ const Board = () => {
             if (tool === 'rect') {
                 const w = currentPos.x - startPos.x;
                 const h = currentPos.y - startPos.y;
-                const radius = 8;
-                const x = startPos.x;
-                const y = startPos.y;
-                ctx.beginPath();
-                ctx.moveTo(x + radius, y);
-                ctx.lineTo(x + w - radius, y);
-                ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-                ctx.lineTo(x + w, y + h - radius);
-                ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-                ctx.lineTo(x + radius, y + h);
-                ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-                ctx.lineTo(x, y + radius);
-                ctx.quadraticCurveTo(x, y, x + radius, y);
-                ctx.closePath();
+                drawRoundedRect(ctx, startPos.x, startPos.y, w, h, 8);
                 ctx.stroke();
             } else if (tool === 'circle') {
                 const radius = Math.sqrt(
@@ -921,109 +463,9 @@ const Board = () => {
         ctx.restore();
     }, [elements, isDrawing, startPos, currentPos, tool, selectedElements, panOffset, zoom, arrowStart, hoveredConnectionPoint, editingElementId]);
 
-    const getCanvasCoords = (e: React.MouseEvent) => {
-        const canvas = canvasRef.current;
-        if (!canvas) return { x: 0, y: 0 };
-        const rect = canvas.getBoundingClientRect();
-        return {
-            x: (e.clientX - rect.left - panOffset.x) / zoom,
-            y: (e.clientY - rect.top - panOffset.y) / zoom
-        };
-    };
-
-    const getElementAtPosition = (x: number, y: number): Element | null => {
-        for (let i = elements.length - 1; i >= 0; i--) {
-            const el = elements[i];
-            if (el.isHidden) continue;
-
-            if (el.type === 'rect') {
-                if (x >= el.x && x <= el.x + (el.w || 0) &&
-                    y >= el.y && y <= el.y + (el.h || 0)) {
-                    return el;
-                }
-            } else if (el.type === 'circle') {
-                const dist = Math.sqrt(Math.pow(x - el.x, 2) + Math.pow(y - el.y, 2));
-                if (dist <= (el.radius || 0)) {
-                    return el;
-                }
-            } else if (el.type === 'text') {
-                const ctx = canvasRef.current?.getContext('2d');
-                if (ctx) {
-                    ctx.font = `${el.fontSize || 16}px ${el.fontFamily || 'Arial'}`;
-                    const textWidth = ctx.measureText(el.text || '').width;
-                    const height = el.fontSize || 16;
-                    if (x >= el.x && x <= el.x + textWidth && y >= el.y - height && y <= el.y + height / 2) {
-                        return el;
-                    }
-                }
-            } else if (el.type === 'image') {
-                if (x >= el.x && x <= el.x + (el.w || 200) && y >= el.y && y <= el.y + (el.h || 200)) {
-                    return el;
-                }
-            } else if (el.type === 'arrow') {
-                let fromPoint = el.startPoint;
-                let toPoint = el.endPoint;
-
-                if (el.fromId && el.fromPoint) {
-                    const fromEl = elements.find(e => e.id === el.fromId);
-                    if (fromEl) {
-                        const fromPoints = getConnectionPoints(fromEl);
-                        fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
-                    }
-                }
-
-                if (el.toId && el.toPoint) {
-                    const toEl = elements.find(e => e.id === el.toId);
-                    if (toEl) {
-                        const toPoints = getConnectionPoints(toEl);
-                        toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
-                    }
-                }
-
-                if (fromPoint && toPoint) {
-                    if (el.arrowType === 'elbow') {
-                        const points = getArrowPoints(el);
-                        let hit = false;
-                        for (let j = 0; j < points.length - 1; j++) {
-                            if (distanceToSegment({ x, y }, points[j], points[j + 1]) < 10) {
-                                hit = true;
-                                break;
-                            }
-                        }
-                        if (hit) return el;
-                    } else if (el.arrowType === 'curved') {
-                        const dx = toPoint.x - fromPoint.x;
-                        const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
-                        const controlPoint2 = { x: toPoint.x - dx / 2, y: toPoint.y };
-                        if (distanceToBezier({ x, y }, fromPoint, controlPoint1, controlPoint2, toPoint) < 10) {
-                            return el;
-                        }
-                    } else {
-                        if (distanceToSegment({ x, y }, fromPoint, toPoint) < 10) return el;
-                    }
-                }
-            }
-        }
-        return null;
-    };
-
-    const getConnectionPointAtPosition = (x: number, y: number): { element: Element, point: ConnectionPoint } | null => {
-        for (const el of elements) {
-            if (el.type === 'arrow' || el.isHidden) continue;
-            const points = getConnectionPoints(el);
-            for (const point of points) {
-                const dist = Math.sqrt(Math.pow(x - point.x, 2) + Math.pow(y - point.y, 2));
-                if (dist <= 10) {
-                    return { element: el, point };
-                }
-            }
-        }
-        return null;
-    };
-
     const handleDoubleClick = (e: React.MouseEvent) => {
         const { x, y } = getCanvasCoords(e);
-        const element = getElementAtPosition(x, y);
+        const element = getElementAtPos(x, y, elements);
         if (element && (element.type === 'rect' || element.type === 'circle')) {
             setEditingElementId(element.id);
             setTool('select');
@@ -1033,7 +475,7 @@ const Board = () => {
     const handleContextMenu = (e: React.MouseEvent) => {
         e.preventDefault();
         const { x, y } = getCanvasCoords(e);
-        const element = getElementAtPosition(x, y);
+        const element = getElementAtPos(x, y, elements);
         if (element) {
             setContextMenu({ x: e.clientX, y: e.clientY, elementId: element.id });
             if (!selectedElements.includes(element.id)) {
@@ -1055,14 +497,14 @@ const Board = () => {
                         if (arrowHandle.type === 'control') {
                             return { ...e, controlPoint: { x, y } };
                         } else if (arrowHandle.type === 'start') {
-                            const connection = getConnectionPointAtPosition(x, y);
+                            const connection = getConnectionPointAtPosition(x, y, elements);
                             if (connection) {
                                 return { ...e, startPoint: undefined, fromId: connection.element.id, fromPoint: connection.point };
                             } else {
                                 return { ...e, startPoint: { x, y }, fromId: undefined, fromPoint: undefined };
                             }
                         } else if (arrowHandle.type === 'end') {
-                            const connection = getConnectionPointAtPosition(x, y);
+                            const connection = getConnectionPointAtPosition(x, y, elements);
                             if (connection) {
                                 return { ...e, endPoint: undefined, toId: connection.element.id, toPoint: connection.point };
                             } else {
@@ -1137,7 +579,7 @@ const Board = () => {
         }
 
         if (tool === 'arrow' || tool === 'line') {
-            const connection = getConnectionPointAtPosition(x, y);
+            const connection = getConnectionPointAtPosition(x, y, elements);
             if (connection) {
                 setHoveredConnectionPoint({ elementId: connection.element.id, point: connection.point });
             } else {
@@ -1187,17 +629,7 @@ const Board = () => {
         }
     };
 
-    const isReadOnly = () => {
-        if (!user || !ownerId) return true; // Loading or not logged in
-        if (user._id === ownerId) return false; // Owner
-        if (visibility === 'public-edit') return false; // Public Edit
-        const collaborator = collaborators.find(c => {
-            const cUserId = c.user?._id || c.user;
-            return cUserId === user._id;
-        });
-        if (collaborator && collaborator.role === 'editor') return false; // Editor
-        return true; // Everyone else (viewer, public-view, private)
-    };
+
 
     const startDrawing = (e: React.MouseEvent) => {
         if (contextMenu) {
@@ -1224,7 +656,7 @@ const Board = () => {
                         return;
                     }
                 } else if (el.type === 'arrow') {
-                    const handles = getArrowHandles(el);
+                    const handles = getArrowHandles(el, elements);
                     const clickedHandle = handles.find(h => {
                         return x >= h.x - 5 && x <= h.x + 5 && y >= h.y - 5 && y <= h.y + 5;
                     });
@@ -1245,7 +677,7 @@ const Board = () => {
         }
 
         if (tool === 'arrow' || tool === 'line') {
-            const connection = getConnectionPointAtPosition(x, y);
+            const connection = getConnectionPointAtPosition(x, y, elements);
             const start = connection ? { x: connection.point.x, y: connection.point.y } : { x, y };
             const startId = connection ? connection.element.id : undefined;
             const startPoint = connection ? connection.point : undefined;
@@ -1287,7 +719,7 @@ const Board = () => {
         }
 
         if (tool === 'select') {
-            const connection = getConnectionPointAtPosition(x, y);
+            const connection = getConnectionPointAtPosition(x, y, elements);
             if (connection) {
                 setArrowStart({ x: connection.point.x, y: connection.point.y, elementId: connection.element.id, point: connection.point });
                 setCurrentPos({ x, y });
@@ -1295,7 +727,7 @@ const Board = () => {
                 return;
             }
 
-            const element = getElementAtPosition(x, y);
+            const element = getElementAtPos(x, y, elements);
             if (element) {
                 if (e.shiftKey) {
                     setSelectedElements(prev => [...prev, element.id]);
@@ -1432,69 +864,55 @@ const Board = () => {
         setCurrentPos(null);
     };
 
-    const deleteSelected = async () => {
+    const deleteSelected = () => {
         if (isReadOnly()) return;
-        if (selectedElements.length === 0) return;
-        const newElements = elements.filter(el => {
-            if (selectedElements.includes(el.id)) return false;
-            if (el.type === 'arrow' && (selectedElements.includes(el.fromId || '') || selectedElements.includes(el.toId || ''))) {
-                return false;
-            }
-            return true;
-        });
+        const newElements = deleteElementsUtil(elements, selectedElements);
         setElements(newElements);
         setSelectedElements([]);
-        setShowPropertiesPanel(false);
         addToHistory(newElements);
         emitElements(newElements);
-        setTool('select');
     };
 
     const copySelected = () => {
-        const selectedEls = elements.filter(el => selectedElements.includes(el.id));
-        setClipboard(selectedEls);
+        const selectedEls = copyElements(elements, selectedElements);
+        if (selectedEls.length > 0) {
+            navigator.clipboard.writeText(JSON.stringify(selectedEls));
+        }
     };
 
     const cutSelected = () => {
         if (isReadOnly()) return;
-        copySelected();
-        deleteSelected();
+        const { clipboard, remainingElements } = cutElements(elements, selectedElements);
+        if (clipboard.length > 0) {
+            navigator.clipboard.writeText(JSON.stringify(clipboard));
+            setElements(remainingElements);
+            setSelectedElements([]);
+            addToHistory(remainingElements);
+            emitElements(remainingElements);
+        }
     };
 
     const paste = async () => {
         if (isReadOnly()) return;
-        if (clipboard.length === 0) return;
-        const newElements = clipboard.map(el => {
-            const newEl = {
-                ...el,
-                id: Date.now().toString() + Math.random(),
-                x: el.x + 20,
-                y: el.y + 20
-            };
-            return newEl;
-        });
-        const allElements = [...elements, ...newElements];
-        setElements(allElements);
-        setSelectedElements(newElements.map(el => el.id));
-        addToHistory(allElements);
-        emitElements(allElements);
+        try {
+            const text = await navigator.clipboard.readText();
+            const clipboardEls = JSON.parse(text) as Element[];
+            if (Array.isArray(clipboardEls) && clipboardEls.length > 0) {
+                const pastedEls = pasteElements(clipboardEls, { x: 20, y: 20 });
+                const newElements = [...elements, ...pastedEls];
+                setElements(newElements);
+                setSelectedElements(pastedEls.map(e => e.id));
+                addToHistory(newElements);
+                emitElements(newElements);
+            }
+        } catch (err) {
+            console.error('Failed to paste:', err);
+        }
     };
 
-    const uploadImage = async (file: File): Promise<string | null> => {
-        const formData = new FormData();
-        formData.append('image', file);
-
-        try {
-            const res = await api.post('/api/upload', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data'
-                }
-            });
-            return res.data.url;
-        } catch (err) {
-            console.error('Error uploading image:', err);
-            return null;
-        }
+    const uploadImage = async (file: File) => {
+        const url = await uploadImageUtil(file);
+        return url;
     };
 
     const handleImageUpload = () => {
@@ -1530,12 +948,7 @@ const Board = () => {
     const updateSelectedElements = (updates: Partial<Element>) => {
         if (isReadOnly()) return;
         if (selectedElements.length === 0) return;
-        const newElements = elements.map(el => {
-            if (selectedElements.includes(el.id)) {
-                return { ...el, ...updates };
-            }
-            return el;
-        });
+        const newElements = updateElements(elements, selectedElements, updates);
         setElements(newElements);
         addToHistory(newElements);
         emitElements(newElements);
@@ -1548,32 +961,7 @@ const Board = () => {
     const changeShape = (newType: 'rect' | 'circle') => {
         if (isReadOnly()) return;
         if (selectedElements.length === 0) return;
-        const newElements = elements.map(el => {
-            if (selectedElements.includes(el.id)) {
-                if (el.type === newType) return el;
-
-                const updates: Partial<Element> = { type: newType };
-
-                if (newType === 'circle' && el.type === 'rect') {
-                    // Rect to Circle
-                    const size = Math.min(el.w || 50, el.h || 50);
-                    updates.radius = size / 2;
-                    // Center it (Rect x,y is top-left, Circle x,y is center)
-                    updates.x = el.x + (el.w || 0) / 2;
-                    updates.y = el.y + (el.h || 0) / 2;
-                } else if (newType === 'rect' && el.type === 'circle') {
-                    // Circle to Rect
-                    const r = el.radius || 25;
-                    updates.w = r * 2;
-                    updates.h = r * 2;
-                    // Top-left (Circle x,y is center, Rect x,y is top-left)
-                    updates.x = el.x - r;
-                    updates.y = el.y - r;
-                }
-                return { ...el, ...updates };
-            }
-            return el;
-        });
+        const newElements = changeElementShape(elements, selectedElements, newType);
         setElements(newElements);
         addToHistory(newElements);
         emitElements(newElements);
@@ -1581,12 +969,7 @@ const Board = () => {
 
     const updateArrowStyle = (id: string, updates: Partial<Element>) => {
         if (isReadOnly()) return;
-        const newElements = elements.map(el => {
-            if (el.id === id) {
-                return { ...el, ...updates };
-            }
-            return el;
-        });
+        const newElements = updateElements(elements, [id], updates);
         setElements(newElements);
         addToHistory(newElements);
         emitElements(newElements);
@@ -1595,12 +978,7 @@ const Board = () => {
 
     const toggleVisibility = (id: string) => {
         if (isReadOnly()) return;
-        const newElements = elements.map(el => {
-            if (el.id === id) {
-                return { ...el, isHidden: !el.isHidden };
-            }
-            return el;
-        });
+        const newElements = toggleElementVisibility(elements, id);
         setElements(newElements);
         addToHistory(newElements);
         emitElements(newElements);
@@ -1679,7 +1057,11 @@ const Board = () => {
             const res = await api.put(`/api/boards/${id}`, updates);
             if (res.data.title) setBoardTitle(res.data.title);
             if (res.data.visibility) setVisibility(res.data.visibility);
-            if (res.data.collaborators) setCollaborators(res.data.collaborators);
+            if (res.data.editors || res.data.viewers) {
+                const editors = (res.data.editors || []).map((u: any) => ({ user: u, role: 'editor' }));
+                const viewers = (res.data.viewers || []).map((u: any) => ({ user: u, role: 'viewer' }));
+                setCollaborators([...editors, ...viewers]);
+            }
         } catch (err) {
             console.error("Failed to update board", err);
         }
@@ -1687,47 +1069,37 @@ const Board = () => {
 
     const handleInvite = async () => {
         if (!inviteEmail) return;
+
+        // Optimistic update not easily possible without user details, so we wait for response
+        // or we could add a temporary placeholder if we wanted.
+
         try {
-            // First search for user
-            const userRes = await api.get(`/api/users/search?q=${inviteEmail}`);
-            if (userRes.data.length > 0) {
-                const userToAdd = userRes.data[0];
-                // Check if already collaborator
-                if (collaborators.some(c => c.user._id === userToAdd._id)) {
-                    alert("User is already a collaborator");
-                    return;
-                }
-                const newCollaborators = [
-                    ...collaborators.map(c => ({ user: c.user?._id || c.user, role: c.role })),
-                    { user: userToAdd._id, role: inviteRole }
-                ];
+            const res = await api.post(`/api/boards/${id}/collaborators`, { email: inviteEmail, role: inviteRole });
 
-                // Optimistic update
-                const newCollabsState = [...collaborators, { user: userToAdd, role: inviteRole }];
-                setCollaborators(newCollabsState);
-                setInviteEmail('');
+            // Sync with server response
+            const editors = (res.data.editors || []).map((u: any) => ({ user: u, role: 'editor' }));
+            const viewers = (res.data.viewers || []).map((u: any) => ({ user: u, role: 'viewer' }));
+            setCollaborators([...editors, ...viewers]);
 
-                await updateBoard({ collaborators: newCollaborators });
-            } else {
-                alert("User not found");
-            }
-        } catch (err) {
+            setInviteEmail('');
+        } catch (err: any) {
             console.error("Invite failed", err);
+            alert(err.response?.data || "Failed to invite user");
         }
     };
 
     const handlersRef = useRef({
         undo, redo, paste, setTool, setSelectedElements,
         copySelected, cutSelected, deleteSelected, handleImageUpload,
-        setArrowStart, elements, clipboard, history, historyIndex,
-        setShowLayers
+        setArrowStart, elements, history, historyIndex,
+        setShowLayers, isReadOnly
     });
 
     handlersRef.current = {
         undo, redo, paste, setTool, setSelectedElements,
         copySelected, cutSelected, deleteSelected, handleImageUpload,
-        setArrowStart, elements, clipboard, history, historyIndex,
-        setShowLayers
+        setArrowStart, elements, history, historyIndex,
+        setShowLayers, isReadOnly
     };
 
     useEffect(() => {
@@ -1737,7 +1109,7 @@ const Board = () => {
             const {
                 undo, redo, paste, setTool, setSelectedElements,
                 copySelected, cutSelected, deleteSelected, handleImageUpload,
-                setArrowStart, elements, setShowLayers
+                setArrowStart, elements, setShowLayers, isReadOnly
             } = handlersRef.current;
 
             if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
@@ -1868,7 +1240,7 @@ const Board = () => {
                                 </div>
                             )
                         ))}
-                        {user && !collaborators.some(c => c.user._id === user._id) && (
+                        {user && !collaborators.some(c => (c.user?._id || c.user) === user._id) && (
                             <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs border-2 border-background" title={user.username + " (You)"}>
                                 {user.username[0].toUpperCase()}
                             </div>
@@ -2577,14 +1949,42 @@ const Board = () => {
                             <label className="block text-sm font-medium mb-2">Collaborators</label>
                             <div className="space-y-2 max-h-40 overflow-y-auto">
                                 {collaborators.map((c, i) => (
-                                    <div key={i} className="flex justify-between items-center p-2 bg-secondary/50 rounded">
+                                    <div key={i} className="flex justify-between items-center p-2 bg-secondary/50 rounded relative">
                                         <div className="flex items-center gap-2">
                                             <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs">
-                                                {c.user.username[0].toUpperCase()}
+                                                {c.user.username?.[0]?.toUpperCase() || '?'}
                                             </div>
-                                            <span className="text-sm">{c.user.username}</span>
+                                            <span className="text-sm">{c.user.username || 'Unknown'}</span>
                                         </div>
-                                        <span className="text-xs text-muted-foreground capitalize">{c.role}</span>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs text-muted-foreground capitalize">{c.role}</span>
+                                            {ownerId === user?._id && (c.user?._id || c.user) !== user?._id && (
+                                                <div className="relative">
+                                                    <button
+                                                        onClick={() => setActiveCollaboratorMenu(activeCollaboratorMenu === (c.user?._id || c.user) ? null : (c.user?._id || c.user))}
+                                                        className="p-1 hover:bg-secondary rounded"
+                                                    >
+                                                        <MoreVertical size={14} />
+                                                    </button>
+                                                    {activeCollaboratorMenu === (c.user?._id || c.user) && (
+                                                        <div className="absolute right-0 top-full mt-1 w-32 bg-card border border-border rounded shadow-lg py-1 z-50">
+                                                            <button
+                                                                onClick={() => handleUpdateCollaboratorRole(c.user?._id || c.user, c.role === 'viewer' ? 'editor' : 'viewer')}
+                                                                className="w-full text-left px-3 py-1.5 text-xs hover:bg-secondary"
+                                                            >
+                                                                Make {c.role === 'viewer' ? 'Editor' : 'Viewer'}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleRemoveCollaborator(c.user?._id || c.user)}
+                                                                className="w-full text-left px-3 py-1.5 text-xs hover:bg-secondary text-destructive"
+                                                            >
+                                                                Remove
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
                                 ))}
                                 {collaborators.length === 0 && (
@@ -2599,3 +1999,4 @@ const Board = () => {
     )
 };
 export default Board;
+

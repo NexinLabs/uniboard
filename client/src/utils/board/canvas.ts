@@ -89,6 +89,7 @@ export function drawText(
     textAlign: 'left' | 'center' | 'right',
     wrap: boolean
 ): void {
+    ctx.textAlign = textAlign;
     if (wrap) {
         const lines = getWrappedLines(ctx, text, maxWidth);
         const lineHeight = fontSize * 1.2;

@@ -68,7 +68,7 @@ io.use((socket, next) => {
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
-    console.log('User connected:', socket.id, socket.user ? `(${socket.user.username})` : '(Guest)');
+    //console.log('User connected:', socket.id, socket.user ? `(${socket.user.username})` : '(Guest)');
 
     // Join a specific board room
     socket.on('join-board', (boardId) => {
@@ -102,7 +102,8 @@ io.on('connection', (socket) => {
                 await Board.findByIdAndUpdate(boardId, { elements });
                 // console.log(`💾 Saved board ${boardId} to database`);
             } else {
-                console.warn(`⚠️ Unauthorized update attempt on board ${boardId} by user ${userId || 'Guest'}`);
+                
+                //console.warn(`⚠️ Unauthorized update attempt on board ${boardId} by user ${userId || 'Guest'}`);
                 // Optionally emit an error back to the sender
                 socket.emit('error', { message: 'Unauthorized to edit this board' });
             }

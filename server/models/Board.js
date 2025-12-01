@@ -1,18 +1,16 @@
 const mongoose = require('mongoose');
 
 const boardSchema = new mongoose.Schema({
-    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    title: { type: String, required: true },
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: [true, 'User is required'] },
+    title: { type: String, required: [true, 'Title is required'] },
     elements: { type: Array, default: [] }, // Store canvas elements here
     visibility: {
         type: String,
         enum: ['private', 'public-view', 'public-edit'],
         default: 'private'
     },
-    collaborators: [{
-        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-        role: { type: String, enum: ['viewer', 'editor'], default: 'viewer' }
-    }]
+    editors: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    viewers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
 }, { timestamps: true });
 
 module.exports = mongoose.model('Board', boardSchema);

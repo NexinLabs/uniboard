@@ -12,7 +12,7 @@ export function emitElements(
     elements: Element[]
 ): void {
     if (socket && boardId) {
-        console.log('📤 Emitting elements via Socket.IO (server will save to DB)');
+        console.debug('📤 Emitting elements via Socket.IO (server will save to DB)');
         socket.emit('element-update', {
             boardId,
             elements
@@ -27,7 +27,7 @@ export function emitElements(
  */
 export function joinBoard(socket: Socket, boardId: string): void {
     socket.emit('join-board', boardId);
-    console.log('Joined board room:', boardId);
+    console.debug('Joined board room:', boardId);
 }
 
 /**
