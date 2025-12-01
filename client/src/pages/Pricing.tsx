@@ -22,10 +22,8 @@ const Pricing = () => {
             gradient: 'from-blue-400 to-cyan-400',
             features: [
                 '3 boards',
-                'Basic drawing tools',
                 'Export to PNG',
                 'Community support',
-                '100 MB storage',
                 'Basic collaboration'
             ],
             cta: 'Get Started',
@@ -39,11 +37,9 @@ const Pricing = () => {
             icon: Crown,
             gradient: 'from-purple-400 to-pink-400',
             features: [
-                'Unlimited boards',
-                'Advanced drawing tools',
+                '100 boards',
                 'Export to PNG, SVG, JSON',
                 'Priority support',
-                '10 GB storage',
                 'Real-time collaboration',
                 'Custom templates',
                 'Version history',

@@ -11,8 +11,7 @@ import {
     AlertCircle,
     CheckCircle2
 } from 'lucide-react';
-import axios from 'axios';
-import { appConfig } from '../config';
+import api from '../utils/api';
 
 interface UserProfile {
     _id: string;
@@ -45,10 +44,7 @@ const Profile = () => {
 
     const fetchProfile = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await axios.get(`${appConfig.API_URL}/api/users/me`, {
-                headers: { token: `Bearer ${token}` }
-            });
+            const res = await api.get('/api/users/me');
             setProfile(res.data);
             setFormData({
                 displayName: res.data.displayName || '',
@@ -74,12 +70,7 @@ const Profile = () => {
         e.preventDefault();
         setSaving(true);
         try {
-            const token = localStorage.getItem('token');
-            const res = await axios.put(
-                `${appConfig.API_URL}/api/users/profile`,
-                formData,
-                { headers: { token: `Bearer ${token}` } }
-            );
+            const res = await api.put('/api/users/profile', formData);
             setProfile(res.data);
             showMessage('success', 'Profile updated successfully!');
         } catch (err) {
@@ -111,19 +102,13 @@ const Profile = () => {
         formData.append('avatar', file);
 
         try {
-            const token = localStorage.getItem('token');
-            const res = await axios.post(
-                `${appConfig.API_URL}/api/users/avatar`,
-                formData,
-                {
-                    headers: {
-                        token: `Bearer ${token}`,
-                        'Content-Type': 'multipart/form-data'
-                    }
+            const res = await api.post('/api/users/avatar', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
                 }
-            );
+            });
             setProfile(res.data.user);
-            showMessage('success', 'Avatar updated successfully!');
+            showMessage('success', 'Avatar uploaded successfully!');
         } catch (err) {
             console.error('Error uploading avatar:', err);
             showMessage('error', 'Failed to upload avatar');
