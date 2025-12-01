@@ -1,121 +1,68 @@
 import { useContext, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { io, Socket } from 'socket.io-client';
 import { appConfig } from '../config';
 import api from '../utils/api';
+import Collaborator from '../utils/board/action/collaborator';
+
 import {
-    Square, Circle, Type, Trash2, MousePointer,
+    Square, Circle, Type, Trash2, MousePointer2,
     ArrowRight, Hand,
     Minus, CornerDownRight, Activity, ArrowLeft, ArrowLeftRight,
-    Plus, Search, AlignLeft, AlignCenter, AlignRight,
-    Layers, Eye, EyeOff, Copy, Scissors, Clipboard, MoreHorizontal,
-    BringToFront, Download
+    Search, AlignLeft, AlignCenter, AlignRight,
+    Layers, Eye, EyeOff, Copy, Scissors, Clipboard,
+    BringToFront, Download,
+    Share2, Menu, User, LayoutDashboard, LogOut, X, Globe, Lock, Image, MoreVertical,
+    Triangle, Diamond, Hexagon, Star
 } from 'lucide-react';
 
-type Tool = 'select' | 'rect' | 'circle' | 'text' | 'image' | 'arrow' | 'line' | 'draw' | 'frame' | 'pan';
+// Import types and utilities from modular board utilities
+import type {
+    Tool,
+    Element,
+    ConnectionPoint,
+    ResizeHandle,
+} from '../utils/board/types';
 
-interface ConnectionPoint {
-    x: number;
-    y: number;
-    position: 'top' | 'right' | 'bottom' | 'left';
-}
+import {
+    // Arrow utilities
+    getArrowHandles,
+    getConnectionPointAtPosition,
 
-interface Element {
-    id: string;
-    type: 'rect' | 'circle' | 'text' | 'image' | 'arrow';
-    x: number;
-    y: number;
-    w?: number;
-    h?: number;
-    radius?: number;
-    text?: string;
-    imageUrl?: string;
-    color?: string;
-    fromId?: string;
-    toId?: string;
-    fromPoint?: ConnectionPoint;
-    toPoint?: ConnectionPoint;
-    startPoint?: { x: number, y: number };
-    endPoint?: { x: number, y: number };
-    // New properties
-    fontSize?: number;
-    fontFamily?: string;
-    textAlign?: 'center' | 'left' | 'right';
-    arrowType?: 'straight' | 'elbow' | 'curved';
-    lineStyle?: 'solid' | 'dashed' | 'dotted';
-    lineWidth?: number;
-    arrowHead?: 'none' | 'start' | 'end' | 'both';
-    backgroundColor?: string;
-    opacity?: number;
-    strokeWidth?: number;
-    textColor?: string;
-    textWrap?: boolean;
-    controlPoint?: { x: number, y: number };
-    isHidden?: boolean;
-    isLocked?: boolean;
-}
+    // Element utilities
+    getResizeHandles,
+    getCursorForHandle,
+    getElementAtPosition as getElementAtPos,
+    updateElements,
+    deleteElements as deleteElementsUtil,
+    changeElementShape,
+    toggleElementVisibility,
 
-const distanceToSegment = (p: { x: number, y: number }, a: { x: number, y: number }, b: { x: number, y: number }) => {
-    const A = p.x - a.x;
-    const B = p.y - a.y;
-    const C = b.x - a.x;
-    const D = b.y - a.y;
+    // History utilities
+    addToHistory as addToHistoryUtil,
 
-    const dot = A * C + B * D;
-    const lenSq = C * C + D * D;
-    let param = -1;
-    if (lenSq !== 0) param = dot / lenSq;
+    // Clipboard utilities
+    copyElements,
+    cutElements,
+    pasteElements,
 
-    let xx, yy;
+    // Image utilities
+    uploadImage as uploadImageUtil,
 
-    if (param < 0) {
-        xx = a.x;
-        yy = a.y;
-    } else if (param > 1) {
-        xx = b.x;
-        yy = b.y;
-    } else {
-        xx = a.x + param * C;
-        yy = a.y + param * D;
-    }
+    // Canvas utilities
+    drawRoundedRect,
+    drawTriangle,
+    drawDiamond,
+    drawHexagon,
+    drawStar,
+    drawArrow,
+    drawConnectionPoints,
+    drawText,
 
-    const dx = p.x - xx;
-    const dy = p.y - yy;
-    return Math.sqrt(dx * dx + dy * dy);
-};
-
-const distanceToBezier = (p: { x: number, y: number }, p0: { x: number, y: number }, p1: { x: number, y: number }, p2: { x: number, y: number }, p3: { x: number, y: number }) => {
-    let minDst = Infinity;
-    for (let t = 0; t <= 1; t += 0.05) {
-        const x = Math.pow(1 - t, 3) * p0.x + 3 * Math.pow(1 - t, 2) * t * p1.x + 3 * (1 - t) * t * t * p2.x + t * t * t * p3.x;
-        const y = Math.pow(1 - t, 3) * p0.y + 3 * Math.pow(1 - t, 2) * t * p1.y + 3 * (1 - t) * t * t * p2.y + t * t * t * p3.y;
-        const d = Math.sqrt(Math.pow(p.x - x, 2) + Math.pow(p.y - y, 2));
-        if (d < minDst) minDst = d;
-    }
-    return minDst;
-};
-
-const getWrappedLines = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
-    const words = text.split(' ');
-    let lines = [];
-    let currentLine = words[0];
-
-    for (let i = 1; i < words.length; i++) {
-        const word = words[i];
-        const width = ctx.measureText(currentLine + " " + word).width;
-        if (width < maxWidth) {
-            currentLine += " " + word;
-        } else {
-            lines.push(currentLine);
-            currentLine = word;
-        }
-    }
-    lines.push(currentLine);
-    return lines;
-};
-
-type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
+    // Socket utilities
+    emitElements as emitElementsUtil,
+} from '../utils/board';
 
 const Board = () => {
     const { id } = useParams();
@@ -130,9 +77,7 @@ const Board = () => {
     const [history, setHistory] = useState<Element[][]>([[]]);
     const [historyIndex, setHistoryIndex] = useState(0);
     const [selectedElements, setSelectedElements] = useState<string[]>([]);
-    const [clipboard, setClipboard] = useState<Element[]>([]);
-    const [currentColor, setCurrentColor] = useState('#ffffff');
-    const [showColorPicker, setShowColorPicker] = useState(false);
+    const [currentColor] = useState('#ffffff');
     const [showPropertiesPanel, setShowPropertiesPanel] = useState(false);
 
     const [startPos, setStartPos] = useState<{ x: number, y: number } | null>(null);
@@ -153,123 +98,20 @@ const Board = () => {
     const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState(false);
     const zoom = 1;
+    const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
 
-    const getArrowHandles = (el: Element): { type: 'start' | 'end' | 'control', x: number, y: number }[] => {
-        if (el.type !== 'arrow') return [];
-        const handles: { type: 'start' | 'end' | 'control', x: number, y: number }[] = [];
-
-        let fromPoint = el.startPoint;
-        let toPoint = el.endPoint;
-
-        if (el.fromId && el.fromPoint) {
-            const fromEl = elements.find(e => e.id === el.fromId);
-            if (fromEl) {
-                const fromPoints = getConnectionPoints(fromEl);
-                fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
-            }
-        }
-
-        if (el.toId && el.toPoint) {
-            const toEl = elements.find(e => e.id === el.toId);
-            if (toEl) {
-                const toPoints = getConnectionPoints(toEl);
-                toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
-            }
-        }
-
-        if (fromPoint) handles.push({ type: 'start', x: fromPoint.x, y: fromPoint.y });
-        if (toPoint) handles.push({ type: 'end', x: toPoint.x, y: toPoint.y });
-
-        if (el.arrowType === 'elbow' && fromPoint && toPoint) {
-            const points = getArrowPoints(el);
-            // We want the handle on the "middle" segment.
-            // getArrowPoints returns [Start, P1, P2, End] for Z-shape.
-            // Middle segment is P1 -> P2.
-            if (points.length >= 3) {
-                // If 4 points: S -> P1 -> P2 -> E. Middle is P1-P2.
-                // If 3 points (aligned): S -> P1 -> E. Middle is P1-E? No, usually 4 points for elbow unless aligned.
-
-                // Let's stick to the previous logic for handle placement as it was robust enough
-                // But we can use the points to be sure.
-
-                // Actually, the previous logic was:
-                // if vertical start: handle at (midX, midY) where midX is variable, midY is fixed?
-                // No, if vertical start: S -> (S.x, midY) -> (E.x, midY) -> E.
-                // The middle segment is horizontal: y = midY.
-                // We want to drag it vertically? No, we drag the horizontal segment up/down.
-                // So handle should be at ((S.x + E.x)/2, midY).
-
-                let midX = (fromPoint.x + toPoint.x) / 2;
-                let midY = (fromPoint.y + toPoint.y) / 2;
-
-                if (el.controlPoint) {
-                    midX = el.controlPoint.x;
-                    midY = el.controlPoint.y;
-                }
-
-                const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
-
-                if (isVerticalStart) {
-                    // Middle segment is horizontal at y=midY. We drag it up/down.
-                    // Handle should be at center of that segment.
-                    // Segment is from (fromPoint.x, midY) to (toPoint.x, midY).
-                    handles.push({ type: 'control', x: (fromPoint.x + toPoint.x) / 2, y: midY });
-                } else {
-                    // Middle segment is vertical at x=midX. We drag it left/right.
-                    handles.push({ type: 'control', x: midX, y: (fromPoint.y + toPoint.y) / 2 });
-                }
-            }
-        }
-
-        return handles;
-    };
-
-    const getResizeHandles = (el: Element): { type: ResizeHandle, x: number, y: number }[] => {
-        if (el.type === 'rect' || el.type === 'image') {
-            const x = el.x;
-            const y = el.y;
-            const w = el.w || 0;
-            const h = el.h || 0;
-            return [
-                { type: 'nw', x, y },
-                { type: 'n', x: x + w / 2, y },
-                { type: 'ne', x: x + w, y },
-                { type: 'e', x: x + w, y: y + h / 2 },
-                { type: 'se', x: x + w, y: y + h },
-                { type: 's', x: x + w / 2, y: y + h },
-                { type: 'sw', x, y: y + h },
-                { type: 'w', x, y: y + h / 2 },
-            ];
-        } else if (el.type === 'circle') {
-            const r = el.radius || 0;
-            const x = el.x - r;
-            const y = el.y - r;
-            const w = r * 2;
-            const h = r * 2;
-            return [
-                { type: 'nw', x, y },
-                { type: 'ne', x: x + w, y },
-                { type: 'se', x: x + w, y: y + h },
-                { type: 'sw', x, y: y + h },
-            ];
-        }
-        return [];
-    };
-
-    const getCursorForHandle = (handle: ResizeHandle) => {
-        switch (handle) {
-            case 'nw': return 'nw-resize';
-            case 'n': return 'n-resize';
-            case 'ne': return 'ne-resize';
-            case 'e': return 'e-resize';
-            case 'se': return 'se-resize';
-            case 's': return 's-resize';
-            case 'sw': return 'sw-resize';
-            case 'w': return 'w-resize';
-            default: return 'default';
-        }
-    };
-
+    // Board Metadata State
+    const [boardTitle, setBoardTitle] = useState('Untitled Board');
+    const [visibility, setVisibility] = useState<'private' | 'public-view' | 'public-edit'>('private');
+    const [collaborators, setCollaborators] = useState<any[]>([]);
+    const [ownerId, setOwnerId] = useState<string | null>(null);
+    const [showShareModal, setShowShareModal] = useState(false);
+    const [showMenuDropdown, setShowMenuDropdown] = useState(false);
+    const [inviteEmail, setInviteEmail] = useState('');
+    const [inviteRole, setInviteRole] = useState<'viewer' | 'editor'>('viewer');
+    const [activeCollaboratorMenu, setActiveCollaboratorMenu] = useState<string | null>(null);
+    const [availableIcons, setAvailableIcons] = useState<any[]>([]);
+    const [iconsLoading, setIconsLoading] = useState(true);
 
 
     useEffect(() => {
@@ -279,6 +121,15 @@ const Board = () => {
                 const res = await api.get(`/api/boards/${id}`);
                 const loadedElements = res.data.elements || [];
                 setElements(loadedElements);
+                setBoardTitle(res.data.title || 'Untitled Board');
+                setVisibility(res.data.visibility || 'private');
+
+                // Merge editors and viewers into collaborators state
+                const editors = (res.data.editors || []).map((u: any) => ({ user: u, role: 'editor' }));
+                const viewers = (res.data.viewers || []).map((u: any) => ({ user: u, role: 'viewer' }));
+                setCollaborators([...editors, ...viewers]);
+
+                setOwnerId(res.data.user || null);
                 setHistory([loadedElements]);
                 setHistoryIndex(0);
             } catch (err) {
@@ -289,26 +140,30 @@ const Board = () => {
 
         // Setup Socket.IO connection
         if (!socketRef.current && id) {
-            console.log('Connecting to Socket.IO...');
-            socketRef.current = io(appConfig.API_URL);
+            console.debug('Connecting to Socket.IO...');
+            const token = user?.token;
+            const socket = io(appConfig.API_URL, {
+                auth: { token: `Bearer ${token}` }
+            });
+            socketRef.current = socket;
 
             // Join the board room
-            socketRef.current.emit('join-board', id);
-            console.log('Joined board room:', id);
+            socket.emit('join-board', id);
+            console.debug('Joined board room:', id);
 
             // Listen for updates from other users
-            socketRef.current.on('elements-updated', (updatedElements: Element[]) => {
-                console.log('📡 Received elements update from another user');
+            socket.on('elements-updated', (updatedElements: Element[]) => {
+                console.debug('📡 Received elements update from another user');
                 setElements(updatedElements);
                 addToHistory(updatedElements);
             });
 
-            socketRef.current.on('user-joined', (data: any) => {
-                console.log('👋 User joined:', data.userId);
+            socket.on('user-joined', (data: any) => {
+                console.debug('👋 User joined:', data.userId);
             });
 
-            socketRef.current.on('user-left', (data: any) => {
-                console.log('👋 User left:', data.userId);
+            socket.on('user-left', (data: any) => {
+                console.debug('👋 User left:', data.userId);
             });
         }
 
@@ -317,7 +172,7 @@ const Board = () => {
                 clearTimeout(saveTimeoutRef.current);
             }
             if (socketRef.current) {
-                console.log('Disconnecting from Socket.IO...');
+                console.debug('Disconnecting from Socket.IO...');
                 socketRef.current.emit('leave-board', id);
                 socketRef.current.disconnect();
                 socketRef.current = null;
@@ -325,27 +180,29 @@ const Board = () => {
         };
     }, [id, user]);
 
-    // REMOVED: No longer needed - server handles DB saves via Socket.IO
-    // const saveElements = async (elementsToSave: Element[]) => { ... }
+    useEffect(() => {
+        const fetchIcons = async () => {
+            try {
+                const res = await api.get('/api/icons/me/icons');
+                setAvailableIcons(res.data);
+                setIconsLoading(false);
+            } catch (err) {
+                console.error('Failed to fetch icons:', err);
+                setIconsLoading(false);
+            }
+        };
+        if (user) fetchIcons();
+    }, [user]);
 
-    // Emit changes via Socket.IO ONLY - server handles DB save
-    const emitElements = (elementsToSave: Element[]) => {
-        if (socketRef.current && id) {
-            console.log('📤 Emitting elements via Socket.IO (server will save to DB)');
-            socketRef.current.emit('element-update', {
-                boardId: id,
-                elements: elementsToSave
-            });
-        } else {
-            console.warn('⚠️ Socket not connected, changes not synced!');
-        }
+    const emitElements = (els: Element[]) => {
+        if (!socketRef.current) return;
+        emitElementsUtil(socketRef.current, id!, els);
     };
 
-    const addToHistory = (newElements: Element[]) => {
-        const newHistory = history.slice(0, historyIndex + 1);
-        newHistory.push(newElements);
+    const addToHistory = (els: Element[]) => {
+        const { history: newHistory, historyIndex: newIndex } = addToHistoryUtil(history, historyIndex, els);
         setHistory(newHistory);
-        setHistoryIndex(newHistory.length - 1);
+        setHistoryIndex(newIndex);
     };
 
     const undo = () => {
@@ -366,108 +223,50 @@ const Board = () => {
         }
     };
 
-    const getConnectionPoints = (el: Element): ConnectionPoint[] => {
-        if (el.type === 'rect' || el.type === 'image') {
-            const x = el.x;
-            const y = el.y;
-            const w = el.w || (el.type === 'image' ? 200 : 0);
-            const h = el.h || (el.type === 'image' ? 200 : 0);
-            const centerX = x + w / 2;
-            const centerY = y + h / 2;
-            return [
-                { x: centerX, y: y, position: 'top' },
-                { x: x + w, y: centerY, position: 'right' },
-                { x: centerX, y: y + h, position: 'bottom' },
-                { x: x, y: centerY, position: 'left' },
-            ];
-        } else if (el.type === 'circle') {
-            const r = el.radius || 0;
-            return [
-                { x: el.x, y: el.y - r, position: 'top' },
-                { x: el.x + r, y: el.y, position: 'right' },
-                { x: el.x, y: el.y + r, position: 'bottom' },
-                { x: el.x - r, y: el.y, position: 'left' },
-            ];
-        }
-        return [];
+    const isReadOnly = () => {
+        if (!user || !ownerId) return true; // Loading or not logged in
+        if (user._id === ownerId) return false; // Owner
+        if (visibility === 'public-edit') return false; // Public Edit
+        const collaborator = collaborators.find(c => {
+            const cUserId = c.user?._id || c.user;
+            return cUserId === user._id;
+        });
+        if (collaborator && collaborator.role === 'editor') return false; // Editor
+        return true; // Everyone else (viewer, public-view, private)
     };
 
-    const getArrowPoints = (el: Element): { x: number, y: number }[] => {
-        let fromPoint = el.startPoint;
-        let toPoint = el.endPoint;
-
-        if (el.fromId && el.fromPoint) {
-            const fromEl = elements.find(e => e.id === el.fromId);
-            if (fromEl) {
-                const fromPoints = getConnectionPoints(fromEl);
-                fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
-            }
-        }
-
-        if (el.toId && el.toPoint) {
-            const toEl = elements.find(e => e.id === el.toId);
-            if (toEl) {
-                const toPoints = getConnectionPoints(toEl);
-                toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
-            }
-        }
-
-        if (!fromPoint || !toPoint) return [];
-
-        const points: { x: number, y: number }[] = [{ x: fromPoint.x, y: fromPoint.y }];
-
-        if (el.arrowType === 'elbow') {
-            let midX = (fromPoint.x + toPoint.x) / 2;
-            let midY = (fromPoint.y + toPoint.y) / 2;
-
-            if (el.controlPoint) {
-                midX = el.controlPoint.x;
-                midY = el.controlPoint.y;
-            }
-
-            const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
-            const isVerticalEnd = el.toPoint?.position === 'top' || el.toPoint?.position === 'bottom';
-
-            if (el.toPoint?.position && !el.controlPoint && isVerticalStart !== isVerticalEnd) {
-                if (isVerticalStart) {
-                    points.push({ x: fromPoint.x, y: toPoint.y });
-                } else {
-                    points.push({ x: toPoint.x, y: fromPoint.y });
-                }
-            } else {
-                if (isVerticalStart) {
-                    points.push({ x: fromPoint.x, y: midY });
-                    points.push({ x: toPoint.x, y: midY });
-                } else {
-                    points.push({ x: midX, y: fromPoint.y });
-                    points.push({ x: midX, y: toPoint.y });
-                }
-            }
-        }
-
-        points.push({ x: toPoint.x, y: toPoint.y });
-        return points;
+    const handleRemoveCollaborator = async (userId: string) => {
+        Collaborator.handleRemoveCollaborator({
+            id: id!,
+            collaborators,
+            setCollaborators,
+            userId,
+            isReadOnly,
+            setActiveCollaboratorMenu
+        });
     };
 
-    const drawRoundedPath = (ctx: CanvasRenderingContext2D, points: { x: number, y: number }[], radius: number) => {
-        if (points.length < 2) return;
-        ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
+    const handleUpdateCollaboratorRole = async (userId: string, newRole: 'viewer' | 'editor') => {
 
-        for (let i = 1; i < points.length - 1; i++) {
-            const p0 = points[i - 1];
-            const p1 = points[i];
-            const p2 = points[i + 1];
-            // Limit radius to half the length of the shortest adjacent segment to avoid artifacts
-            // We check both X and Y distances, one will be 0 for orthogonal lines, so we take the max of the diffs
-            const dist1 = Math.max(Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y));
-            const dist2 = Math.max(Math.abs(p2.x - p1.x), Math.abs(p2.y - p1.y));
-            const r = Math.min(radius, dist1 / 2, dist2 / 2);
-            ctx.arcTo(p1.x, p1.y, p2.x, p2.y, r);
-        }
+        Collaborator.handleUpdateCollaboratorRole({
+            id: id!,
+            collaborators,
+            setCollaborators,
+            userId,
+            isReadOnly,
+            setActiveCollaboratorMenu
+        }, newRole);
+    };
 
-        ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-        ctx.stroke();
+    const getCanvasCoords = (e: React.MouseEvent) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return { x: 0, y: 0 };
+        const rect = canvas.getBoundingClientRect();
+        return {
+            x: (e.clientX - rect.left - panOffset.x) / zoom,
+            y: (e.clientY - rect.top - panOffset.y) / zoom
+        };
+
     };
 
     useEffect(() => {
@@ -486,197 +285,18 @@ const Board = () => {
             const isSelected = selectedElements.includes(el.id);
 
             if (el.type === 'arrow') {
-                const fromEl = elements.find(e => e.id === el.fromId);
-                const toEl = elements.find(e => e.id === el.toId);
-
-                let fromPoint = el.startPoint;
-                let toPoint = el.endPoint;
-
-                if (fromEl && el.fromPoint) {
-                    const fromPoints = getConnectionPoints(fromEl);
-                    fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
-                }
-
-                if (toEl && el.toPoint) {
-                    const toPoints = getConnectionPoints(toEl);
-                    toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
-                }
-
-                if (!fromPoint || !toPoint) return;
-
-                ctx.strokeStyle = el.color || 'white';
-                ctx.lineWidth = (el.lineWidth || 2) + (selectedElements.includes(el.id) ? 1 : 0);
-
-                if (el.lineStyle === 'dashed') ctx.setLineDash([10, 5]);
-                else if (el.lineStyle === 'dotted') ctx.setLineDash([2, 4]);
-                else ctx.setLineDash([]);
-
-                let endAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x);
-
-                if (el.arrowType === 'elbow') {
-                    const points = getArrowPoints(el);
-                    drawRoundedPath(ctx, points, 12); // Radius 12
-
-                    // Calculate end angle from last segment
-                    if (points.length >= 2) {
-                        const pLast = points[points.length - 1];
-                        const pPrev = points[points.length - 2];
-                        endAngle = Math.atan2(pLast.y - pPrev.y, pLast.x - pPrev.x);
-                    }
-                } else if (el.arrowType === 'curved') {
-                    const dist = Math.sqrt(Math.pow(toPoint.x - fromPoint.x, 2) + Math.pow(toPoint.y - fromPoint.y, 2));
-                    const len = Math.max(dist * 0.5, 30);
-
-                    let cp1 = { x: fromPoint.x, y: fromPoint.y };
-                    let cp2 = { x: toPoint.x, y: toPoint.y };
-
-                    if (el.fromPoint?.position) {
-                        switch (el.fromPoint.position) {
-                            case 'top': cp1.y -= len; break;
-                            case 'bottom': cp1.y += len; break;
-                            case 'left': cp1.x -= len; break;
-                            case 'right': cp1.x += len; break;
-                        }
-                    } else {
-                        cp1.x += (toPoint.x - fromPoint.x) / 2;
-                    }
-
-                    if (el.toPoint?.position) {
-                        switch (el.toPoint.position) {
-                            case 'top': cp2.y -= len; break;
-                            case 'bottom': cp2.y += len; break;
-                            case 'left': cp2.x -= len; break;
-                            case 'right': cp2.x += len; break;
-                        }
-                    } else {
-                        cp2.x -= (toPoint.x - fromPoint.x) / 2;
-                    }
-
-                    ctx.beginPath();
-                    ctx.moveTo(fromPoint.x, fromPoint.y);
-                    ctx.bezierCurveTo(cp1.x, cp1.y, cp2.x, cp2.y, toPoint.x, toPoint.y);
-                    ctx.stroke();
-                    // Approximate end angle for bezier
-                    endAngle = Math.atan2(toPoint.y - cp2.y, toPoint.x - cp2.x);
-                } else {
-                    ctx.beginPath();
-                    ctx.moveTo(fromPoint.x, fromPoint.y);
-                    ctx.lineTo(toPoint.x, toPoint.y);
-                    ctx.stroke();
-                }
-                // ctx.stroke(); // Removed because drawRoundedPath strokes, and others stroke manually
-                ctx.setLineDash([]);
-                const headLength = 15;
-
-                if (el.toPoint?.position) {
-                    switch (el.toPoint.position) {
-                        case 'top': endAngle = Math.PI / 2; break;
-                        case 'bottom': endAngle = -Math.PI / 2; break;
-                        case 'left': endAngle = 0; break;
-                        case 'right': endAngle = Math.PI; break;
-                    }
-                }
-
-                // Draw start arrow head
-                if (el.arrowHead === 'start' || el.arrowHead === 'both') {
-                    let startAngle;
-                    if (el.fromPoint?.position) {
-                        switch (el.fromPoint.position) {
-                            case 'top': startAngle = Math.PI / 2; break;
-                            case 'bottom': startAngle = -Math.PI / 2; break;
-                            case 'left': startAngle = 0; break;
-                            case 'right': startAngle = Math.PI; break;
-                        }
-                    } else if (el.arrowType === 'elbow') {
-                        const points = getArrowPoints(el);
-                        if (points.length >= 2) {
-                            const p0 = points[0];
-                            const p1 = points[1];
-                            startAngle = Math.atan2(p1.y - p0.y, p1.x - p0.x) + Math.PI;
-                        } else {
-                            startAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x) + Math.PI;
-                        }
-                    } else if (el.arrowType === 'curved') {
-                        const dx = toPoint.x - fromPoint.x;
-                        const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
-                        startAngle = Math.atan2(controlPoint1.y - fromPoint.y, controlPoint1.x - fromPoint.x) + Math.PI;
-                    } else {
-                        startAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x) + Math.PI;
-                    }
-
-                    ctx.beginPath();
-                    ctx.moveTo(fromPoint.x, fromPoint.y);
-                    ctx.lineTo(
-                        fromPoint.x - headLength * Math.cos(startAngle - Math.PI / 6),
-                        fromPoint.y - headLength * Math.sin(startAngle - Math.PI / 6)
-                    );
-                    ctx.moveTo(fromPoint.x, fromPoint.y);
-                    ctx.lineTo(
-                        fromPoint.x - headLength * Math.cos(startAngle + Math.PI / 6),
-                        fromPoint.y - headLength * Math.sin(startAngle + Math.PI / 6)
-                    );
-                    ctx.stroke();
-                }
-
-                // Draw end arrow head
-                if (el.arrowHead === 'end' || el.arrowHead === 'both' || !el.arrowHead) {
-                    ctx.beginPath();
-                    ctx.moveTo(toPoint.x, toPoint.y);
-                    ctx.lineTo(
-                        toPoint.x - headLength * Math.cos(endAngle - Math.PI / 6),
-                        toPoint.y - headLength * Math.sin(endAngle - Math.PI / 6)
-                    );
-                    ctx.moveTo(toPoint.x, toPoint.y);
-                    ctx.lineTo(
-                        toPoint.x - headLength * Math.cos(endAngle + Math.PI / 6),
-                        toPoint.y - headLength * Math.sin(endAngle + Math.PI / 6)
-                    );
-                    ctx.stroke();
-                }
+                drawArrow(ctx, el, elements, isSelected);
             } else if (el.type === 'rect') {
                 ctx.globalAlpha = el.opacity || 1;
                 if (el.backgroundColor) {
                     ctx.fillStyle = el.backgroundColor;
-                    const radius = 8;
-                    const x = el.x;
-                    const y = el.y;
-                    const w = el.w || 0;
-                    const h = el.h || 0;
-                    ctx.beginPath();
-                    ctx.moveTo(x + radius, y);
-                    ctx.lineTo(x + w - radius, y);
-                    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-                    ctx.lineTo(x + w, y + h - radius);
-                    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-                    ctx.lineTo(x + radius, y + h);
-                    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-                    ctx.lineTo(x, y + radius);
-                    ctx.quadraticCurveTo(x, y, x + radius, y);
-                    ctx.closePath();
+                    drawRoundedRect(ctx, el.x, el.y, el.w || 0, el.h || 0, 8);
                     ctx.fill();
                 }
-
                 ctx.strokeStyle = el.color || 'white';
                 ctx.lineWidth = (el.strokeWidth || 2) + (isSelected ? 1 : 0);
-                const radius = 8;
-                const x = el.x;
-                const y = el.y;
-                const w = el.w || 0;
-                const h = el.h || 0;
-                ctx.beginPath();
-                ctx.moveTo(x + radius, y);
-                ctx.lineTo(x + w - radius, y);
-                ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-                ctx.lineTo(x + w, y + h - radius);
-                ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-                ctx.lineTo(x + radius, y + h);
-                ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-                ctx.lineTo(x, y + radius);
-                ctx.quadraticCurveTo(x, y, x + radius, y);
-                ctx.closePath();
+                drawRoundedRect(ctx, el.x, el.y, el.w || 0, el.h || 0, 8);
                 ctx.stroke();
-
-                // Reset alpha for text
                 ctx.globalAlpha = 1;
 
                 if (el.text && el.id !== editingElementId) {
@@ -686,37 +306,138 @@ const Board = () => {
                     ctx.textAlign = el.textAlign || 'center';
                     ctx.textBaseline = 'middle';
 
-                    let textX = x + w / 2;
-                    if (el.textAlign === 'left') textX = x + 10;
-                    if (el.textAlign === 'right') textX = x + w - 10;
+                    let textX = el.x + (el.w || 0) / 2;
+                    if (el.textAlign === 'left') textX = el.x + 10;
+                    if (el.textAlign === 'right') textX = el.x + (el.w || 0) - 10;
 
-                    if (el.textWrap) {
-                        const maxWidth = w - 20;
-                        const lines = getWrappedLines(ctx, el.text, maxWidth);
-                        const lineHeight = fontSize * 1.2;
-                        const totalHeight = lines.length * lineHeight;
-                        let startY = y + h / 2 - totalHeight / 2 + lineHeight / 2;
-
-                        lines.forEach((line, i) => {
-                            ctx.fillText(line, textX, startY + i * lineHeight);
-                        });
-                    } else {
-                        ctx.fillText(el.text, textX, y + h / 2);
-                    }
+                    drawText(ctx, el.text, textX, el.y + (el.h || 0) / 2, (el.w || 0) - 20, fontSize, el.textAlign || 'center', el.textWrap || false);
                 }
 
                 if (tool === 'arrow' || isSelected) {
-                    getConnectionPoints(el).forEach(point => {
-                        const isHovered = hoveredConnectionPoint?.elementId === el.id &&
-                            hoveredConnectionPoint?.point.position === point.position;
-                        ctx.fillStyle = isHovered ? '#3b82f6' : '#60a5fa';
-                        ctx.beginPath();
-                        ctx.arc(point.x, point.y, isHovered ? 6 : 4, 0, 2 * Math.PI);
-                        ctx.fill();
-                        ctx.strokeStyle = 'white';
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
-                    });
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
+                }
+                if (tool === 'arrow' || isSelected) {
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
+                }
+            } else if (el.type === 'triangle') {
+                ctx.globalAlpha = el.opacity || 1;
+                if (el.backgroundColor) {
+                    ctx.fillStyle = el.backgroundColor;
+                    drawTriangle(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                    ctx.fill();
+                }
+                ctx.strokeStyle = el.color || 'white';
+                ctx.lineWidth = (el.strokeWidth || 2) + (isSelected ? 1 : 0);
+                drawTriangle(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+
+                if (el.text && el.id !== editingElementId) {
+                    ctx.fillStyle = el.textColor || el.color || 'white';
+                    const fontSize = el.fontSize || 16;
+                    ctx.font = `${fontSize}px ${el.fontFamily || 'Arial'}`;
+                    ctx.textAlign = el.textAlign || 'center';
+                    ctx.textBaseline = 'middle';
+
+                    let textX = el.x + (el.w || 0) / 2;
+                    if (el.textAlign === 'left') textX = el.x + 10;
+                    if (el.textAlign === 'right') textX = el.x + (el.w || 0) - 10;
+
+                    drawText(ctx, el.text, textX, el.y + (el.h || 0) / 2, (el.w || 0) - 20, fontSize, el.textAlign || 'center', el.textWrap || false);
+                }
+
+                if (tool === 'arrow' || isSelected) {
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
+                }
+            } else if (el.type === 'diamond') {
+                ctx.globalAlpha = el.opacity || 1;
+                if (el.backgroundColor) {
+                    ctx.fillStyle = el.backgroundColor;
+                    drawDiamond(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                    ctx.fill();
+                }
+                ctx.strokeStyle = el.color || 'white';
+                ctx.lineWidth = (el.strokeWidth || 2) + (isSelected ? 1 : 0);
+                drawDiamond(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+
+                if (el.text && el.id !== editingElementId) {
+                    ctx.fillStyle = el.textColor || el.color || 'white';
+                    const fontSize = el.fontSize || 16;
+                    ctx.font = `${fontSize}px ${el.fontFamily || 'Arial'}`;
+                    ctx.textAlign = el.textAlign || 'center';
+                    ctx.textBaseline = 'middle';
+
+                    let textX = el.x + (el.w || 0) / 2;
+                    if (el.textAlign === 'left') textX = el.x + 10;
+                    if (el.textAlign === 'right') textX = el.x + (el.w || 0) - 10;
+
+                    drawText(ctx, el.text, textX, el.y + (el.h || 0) / 2, (el.w || 0) - 20, fontSize, el.textAlign || 'center', el.textWrap || false);
+                }
+
+                if (tool === 'arrow' || isSelected) {
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
+                }
+            } else if (el.type === 'hexagon') {
+                ctx.globalAlpha = el.opacity || 1;
+                if (el.backgroundColor) {
+                    ctx.fillStyle = el.backgroundColor;
+                    drawHexagon(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                    ctx.fill();
+                }
+                ctx.strokeStyle = el.color || 'white';
+                ctx.lineWidth = (el.strokeWidth || 2) + (isSelected ? 1 : 0);
+                drawHexagon(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+
+                if (el.text && el.id !== editingElementId) {
+                    ctx.fillStyle = el.textColor || el.color || 'white';
+                    const fontSize = el.fontSize || 16;
+                    ctx.font = `${fontSize}px ${el.fontFamily || 'Arial'}`;
+                    ctx.textAlign = el.textAlign || 'center';
+                    ctx.textBaseline = 'middle';
+
+                    let textX = el.x + (el.w || 0) / 2;
+                    if (el.textAlign === 'left') textX = el.x + 10;
+                    if (el.textAlign === 'right') textX = el.x + (el.w || 0) - 10;
+
+                    drawText(ctx, el.text, textX, el.y + (el.h || 0) / 2, (el.w || 0) - 20, fontSize, el.textAlign || 'center', el.textWrap || false);
+                }
+
+                if (tool === 'arrow' || isSelected) {
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
+                }
+            } else if (el.type === 'star') {
+                ctx.globalAlpha = el.opacity || 1;
+                if (el.backgroundColor) {
+                    ctx.fillStyle = el.backgroundColor;
+                    drawStar(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                    ctx.fill();
+                }
+                ctx.strokeStyle = el.color || 'white';
+                ctx.lineWidth = (el.strokeWidth || 2) + (isSelected ? 1 : 0);
+                drawStar(ctx, el.x, el.y, el.w || 0, el.h || 0);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+
+                if (el.text && el.id !== editingElementId) {
+                    ctx.fillStyle = el.textColor || el.color || 'white';
+                    const fontSize = el.fontSize || 16;
+                    ctx.font = `${fontSize}px ${el.fontFamily || 'Arial'}`;
+                    ctx.textAlign = el.textAlign || 'center';
+                    ctx.textBaseline = 'middle';
+
+                    let textX = el.x + (el.w || 0) / 2;
+                    if (el.textAlign === 'left') textX = el.x + 10;
+                    if (el.textAlign === 'right') textX = el.x + (el.w || 0) - 10;
+
+                    drawText(ctx, el.text, textX, el.y + (el.h || 0) / 2, (el.w || 0) - 20, fontSize, el.textAlign || 'center', el.textWrap || false);
+                }
+
+                if (tool === 'arrow' || isSelected) {
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
                 }
             } else if (el.type === 'circle') {
                 ctx.globalAlpha = el.opacity || 1;
@@ -747,33 +468,11 @@ const Board = () => {
                     if (el.textAlign === 'left') textX = el.x - (el.radius || 0) + 10;
                     if (el.textAlign === 'right') textX = el.x + (el.radius || 0) - 10;
 
-                    if (el.textWrap) {
-                        const maxWidth = (el.radius || 0) * 2 - 20;
-                        const lines = getWrappedLines(ctx, el.text, maxWidth);
-                        const lineHeight = fontSize * 1.2;
-                        const totalHeight = lines.length * lineHeight;
-                        let startY = el.y - totalHeight / 2 + lineHeight / 2;
-
-                        lines.forEach((line, i) => {
-                            ctx.fillText(line, textX, startY + i * lineHeight);
-                        });
-                    } else {
-                        ctx.fillText(el.text, textX, el.y);
-                    }
+                    drawText(ctx, el.text, textX, el.y, ((el.radius || 0) * 2) - 20, fontSize, el.textAlign || 'center', el.textWrap || false);
                 }
 
                 if (tool === 'arrow' || isSelected) {
-                    getConnectionPoints(el).forEach(point => {
-                        const isHovered = hoveredConnectionPoint?.elementId === el.id &&
-                            hoveredConnectionPoint?.point.position === point.position;
-                        ctx.fillStyle = isHovered ? '#3b82f6' : '#60a5fa';
-                        ctx.beginPath();
-                        ctx.arc(point.x, point.y, isHovered ? 6 : 4, 0, 2 * Math.PI);
-                        ctx.fill();
-                        ctx.strokeStyle = 'white';
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
-                    });
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
                 }
             } else if (el.type === 'text') {
                 ctx.globalAlpha = el.opacity || 1;
@@ -789,9 +488,28 @@ const Board = () => {
                 }
             } else if (el.type === 'image' && el.imageUrl) {
                 ctx.globalAlpha = el.opacity || 1;
-                const img = new Image();
-                img.src = el.imageUrl;
-                if (img.complete) {
+
+                // Use cached image or create new one
+                let img = imageCache.current.get(el.imageUrl);
+                if (!img) {
+                    img = new window.Image();
+                    img.src = el.imageUrl;
+                    imageCache.current.set(el.imageUrl, img);
+
+                    // Set up load handler only once
+                    img.onload = () => {
+                        // Force a redraw by requesting animation frame
+                        requestAnimationFrame(() => {
+                            // The useEffect dependency on elements will handle the redraw
+                        });
+                    };
+                    img.onerror = () => {
+                        console.error('Failed to load image:', el.imageUrl);
+                    };
+                }
+
+                // Draw if loaded
+                if (img.complete && img.naturalWidth > 0) {
                     ctx.drawImage(img, el.x, el.y, el.w || 200, el.h || 200);
                     if (isSelected) {
                         ctx.strokeStyle = '#60a5fa';
@@ -801,23 +519,15 @@ const Board = () => {
                 }
 
                 if (tool === 'arrow' || isSelected) {
-                    getConnectionPoints(el).forEach(point => {
-                        const isHovered = hoveredConnectionPoint?.elementId === el.id &&
-                            hoveredConnectionPoint?.point.position === point.position;
-                        ctx.fillStyle = isHovered ? '#3b82f6' : '#60a5fa';
-                        ctx.beginPath();
-                        ctx.arc(point.x, point.y, isHovered ? 6 : 4, 0, 2 * Math.PI);
-                        ctx.fill();
-                        ctx.strokeStyle = 'white';
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
-                    });
+                    drawConnectionPoints(ctx, el, hoveredConnectionPoint);
                 }
             }
 
             ctx.globalAlpha = 1;
 
-            if (isSelected && (el.type === 'rect' || el.type === 'circle' || el.type === 'image')) {
+            ctx.globalAlpha = 1;
+
+            if (isSelected && (el.type === 'rect' || el.type === 'circle' || el.type === 'image' || el.type === 'triangle' || el.type === 'diamond' || el.type === 'hexagon' || el.type === 'star')) {
                 const handles = getResizeHandles(el);
                 handles.forEach(handle => {
                     ctx.fillStyle = 'white';
@@ -834,7 +544,7 @@ const Board = () => {
         if (selectedElements.length === 1) {
             const el = elements.find(e => e.id === selectedElements[0]);
             if (el && el.type === 'arrow') {
-                const handles = getArrowHandles(el);
+                const handles = getArrowHandles(el, elements);
                 handles.forEach(handle => {
                     ctx.fillStyle = handle.type === 'control' ? '#f59e0b' : 'white';
                     ctx.strokeStyle = '#3b82f6';
@@ -882,20 +592,27 @@ const Board = () => {
             if (tool === 'rect') {
                 const w = currentPos.x - startPos.x;
                 const h = currentPos.y - startPos.y;
-                const radius = 8;
-                const x = startPos.x;
-                const y = startPos.y;
-                ctx.beginPath();
-                ctx.moveTo(x + radius, y);
-                ctx.lineTo(x + w - radius, y);
-                ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
-                ctx.lineTo(x + w, y + h - radius);
-                ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
-                ctx.lineTo(x + radius, y + h);
-                ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
-                ctx.lineTo(x, y + radius);
-                ctx.quadraticCurveTo(x, y, x + radius, y);
-                ctx.closePath();
+                drawRoundedRect(ctx, startPos.x, startPos.y, w, h, 8);
+                ctx.stroke();
+            } else if (tool === 'triangle') {
+                const w = currentPos.x - startPos.x;
+                const h = currentPos.y - startPos.y;
+                drawTriangle(ctx, startPos.x, startPos.y, w, h);
+                ctx.stroke();
+            } else if (tool === 'diamond') {
+                const w = currentPos.x - startPos.x;
+                const h = currentPos.y - startPos.y;
+                drawDiamond(ctx, startPos.x, startPos.y, w, h);
+                ctx.stroke();
+            } else if (tool === 'hexagon') {
+                const w = currentPos.x - startPos.x;
+                const h = currentPos.y - startPos.y;
+                drawHexagon(ctx, startPos.x, startPos.y, w, h);
+                ctx.stroke();
+            } else if (tool === 'star') {
+                const w = currentPos.x - startPos.x;
+                const h = currentPos.y - startPos.y;
+                drawStar(ctx, startPos.x, startPos.y, w, h);
                 ctx.stroke();
             } else if (tool === 'circle') {
                 const radius = Math.sqrt(
@@ -912,110 +629,10 @@ const Board = () => {
         ctx.restore();
     }, [elements, isDrawing, startPos, currentPos, tool, selectedElements, panOffset, zoom, arrowStart, hoveredConnectionPoint, editingElementId]);
 
-    const getCanvasCoords = (e: React.MouseEvent) => {
-        const canvas = canvasRef.current;
-        if (!canvas) return { x: 0, y: 0 };
-        const rect = canvas.getBoundingClientRect();
-        return {
-            x: (e.clientX - rect.left - panOffset.x) / zoom,
-            y: (e.clientY - rect.top - panOffset.y) / zoom
-        };
-    };
-
-    const getElementAtPosition = (x: number, y: number): Element | null => {
-        for (let i = elements.length - 1; i >= 0; i--) {
-            const el = elements[i];
-            if (el.isHidden) continue;
-
-            if (el.type === 'rect') {
-                if (x >= el.x && x <= el.x + (el.w || 0) &&
-                    y >= el.y && y <= el.y + (el.h || 0)) {
-                    return el;
-                }
-            } else if (el.type === 'circle') {
-                const dist = Math.sqrt(Math.pow(x - el.x, 2) + Math.pow(y - el.y, 2));
-                if (dist <= (el.radius || 0)) {
-                    return el;
-                }
-            } else if (el.type === 'text') {
-                const ctx = canvasRef.current?.getContext('2d');
-                if (ctx) {
-                    ctx.font = `${el.fontSize || 16}px ${el.fontFamily || 'Arial'}`;
-                    const textWidth = ctx.measureText(el.text || '').width;
-                    const height = el.fontSize || 16;
-                    if (x >= el.x && x <= el.x + textWidth && y >= el.y - height && y <= el.y + height / 2) {
-                        return el;
-                    }
-                }
-            } else if (el.type === 'image') {
-                if (x >= el.x && x <= el.x + (el.w || 200) && y >= el.y && y <= el.y + (el.h || 200)) {
-                    return el;
-                }
-            } else if (el.type === 'arrow') {
-                let fromPoint = el.startPoint;
-                let toPoint = el.endPoint;
-
-                if (el.fromId && el.fromPoint) {
-                    const fromEl = elements.find(e => e.id === el.fromId);
-                    if (fromEl) {
-                        const fromPoints = getConnectionPoints(fromEl);
-                        fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
-                    }
-                }
-
-                if (el.toId && el.toPoint) {
-                    const toEl = elements.find(e => e.id === el.toId);
-                    if (toEl) {
-                        const toPoints = getConnectionPoints(toEl);
-                        toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
-                    }
-                }
-
-                if (fromPoint && toPoint) {
-                    if (el.arrowType === 'elbow') {
-                        const points = getArrowPoints(el);
-                        let hit = false;
-                        for (let j = 0; j < points.length - 1; j++) {
-                            if (distanceToSegment({ x, y }, points[j], points[j + 1]) < 10) {
-                                hit = true;
-                                break;
-                            }
-                        }
-                        if (hit) return el;
-                    } else if (el.arrowType === 'curved') {
-                        const dx = toPoint.x - fromPoint.x;
-                        const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
-                        const controlPoint2 = { x: toPoint.x - dx / 2, y: toPoint.y };
-                        if (distanceToBezier({ x, y }, fromPoint, controlPoint1, controlPoint2, toPoint) < 10) {
-                            return el;
-                        }
-                    } else {
-                        if (distanceToSegment({ x, y }, fromPoint, toPoint) < 10) return el;
-                    }
-                }
-            }
-        }
-        return null;
-    };
-
-    const getConnectionPointAtPosition = (x: number, y: number): { element: Element, point: ConnectionPoint } | null => {
-        for (const el of elements) {
-            if (el.type === 'arrow' || el.isHidden) continue;
-            const points = getConnectionPoints(el);
-            for (const point of points) {
-                const dist = Math.sqrt(Math.pow(x - point.x, 2) + Math.pow(y - point.y, 2));
-                if (dist <= 10) {
-                    return { element: el, point };
-                }
-            }
-        }
-        return null;
-    };
-
     const handleDoubleClick = (e: React.MouseEvent) => {
         const { x, y } = getCanvasCoords(e);
-        const element = getElementAtPosition(x, y);
-        if (element && (element.type === 'rect' || element.type === 'circle')) {
+        const element = getElementAtPos(x, y, elements);
+        if (element && (element.type === 'rect' || element.type === 'circle' || element.type === 'triangle' || element.type === 'diamond' || element.type === 'hexagon' || element.type === 'star')) {
             setEditingElementId(element.id);
             setTool('select');
         }
@@ -1024,14 +641,16 @@ const Board = () => {
     const handleContextMenu = (e: React.MouseEvent) => {
         e.preventDefault();
         const { x, y } = getCanvasCoords(e);
-        const element = getElementAtPosition(x, y);
+        const element = getElementAtPos(x, y, elements);
+
+        setContextMenu({ x: e.clientX, y: e.clientY, elementId: element ? element.id : '' });
+
         if (element) {
-            setContextMenu({ x: e.clientX, y: e.clientY, elementId: element.id });
             if (!selectedElements.includes(element.id)) {
                 setSelectedElements([element.id]);
             }
         } else {
-            setContextMenu(null);
+            setSelectedElements([]);
         }
     };
 
@@ -1046,14 +665,14 @@ const Board = () => {
                         if (arrowHandle.type === 'control') {
                             return { ...e, controlPoint: { x, y } };
                         } else if (arrowHandle.type === 'start') {
-                            const connection = getConnectionPointAtPosition(x, y);
+                            const connection = getConnectionPointAtPosition(x, y, elements);
                             if (connection) {
                                 return { ...e, startPoint: undefined, fromId: connection.element.id, fromPoint: connection.point };
                             } else {
                                 return { ...e, startPoint: { x, y }, fromId: undefined, fromPoint: undefined };
                             }
                         } else if (arrowHandle.type === 'end') {
-                            const connection = getConnectionPointAtPosition(x, y);
+                            const connection = getConnectionPointAtPosition(x, y, elements);
                             if (connection) {
                                 return { ...e, endPoint: undefined, toId: connection.element.id, toPoint: connection.point };
                             } else {
@@ -1128,7 +747,7 @@ const Board = () => {
         }
 
         if (tool === 'arrow' || tool === 'line') {
-            const connection = getConnectionPointAtPosition(x, y);
+            const connection = getConnectionPointAtPosition(x, y, elements);
             if (connection) {
                 setHoveredConnectionPoint({ elementId: connection.element.id, point: connection.point });
             } else {
@@ -1184,12 +803,14 @@ const Board = () => {
             return;
         }
 
+        if (isReadOnly() && tool !== 'pan') return;
+
         const { x, y } = getCanvasCoords(e);
 
         if (selectedElements.length === 1) {
             const el = elements.find(e => e.id === selectedElements[0]);
             if (el) {
-                if (el.type === 'rect' || el.type === 'circle' || el.type === 'image') {
+                if (el.type === 'rect' || el.type === 'circle' || el.type === 'image' || el.type === 'triangle' || el.type === 'diamond' || el.type === 'hexagon' || el.type === 'star') {
                     const handles = getResizeHandles(el);
                     const clickedHandle = handles.find(h => {
                         return x >= h.x - 5 && x <= h.x + 5 && y >= h.y - 5 && y <= h.y + 5;
@@ -1201,7 +822,7 @@ const Board = () => {
                         return;
                     }
                 } else if (el.type === 'arrow') {
-                    const handles = getArrowHandles(el);
+                    const handles = getArrowHandles(el, elements);
                     const clickedHandle = handles.find(h => {
                         return x >= h.x - 5 && x <= h.x + 5 && y >= h.y - 5 && y <= h.y + 5;
                     });
@@ -1222,7 +843,7 @@ const Board = () => {
         }
 
         if (tool === 'arrow' || tool === 'line') {
-            const connection = getConnectionPointAtPosition(x, y);
+            const connection = getConnectionPointAtPosition(x, y, elements);
             const start = connection ? { x: connection.point.x, y: connection.point.y } : { x, y };
             const startId = connection ? connection.element.id : undefined;
             const startPoint = connection ? connection.point : undefined;
@@ -1250,7 +871,7 @@ const Board = () => {
                     endPoint: !endId ? { x: end.x, y: end.y } : undefined,
                     color: currentColor,
                     arrowHead: tool === 'line' ? 'none' : 'end',
-                    arrowType: tool === 'line' ? 'straight' : 'straight'
+                    arrowType: tool === 'line' ? 'straight' : 'curved'
                 };
                 const newElements = [...elements, newElement];
                 setElements(newElements);
@@ -1264,7 +885,7 @@ const Board = () => {
         }
 
         if (tool === 'select') {
-            const connection = getConnectionPointAtPosition(x, y);
+            const connection = getConnectionPointAtPosition(x, y, elements);
             if (connection) {
                 setArrowStart({ x: connection.point.x, y: connection.point.y, elementId: connection.element.id, point: connection.point });
                 setCurrentPos({ x, y });
@@ -1272,7 +893,7 @@ const Board = () => {
                 return;
             }
 
-            const element = getElementAtPosition(x, y);
+            const element = getElementAtPos(x, y, elements);
             if (element) {
                 if (e.shiftKey) {
                     setSelectedElements(prev => [...prev, element.id]);
@@ -1335,7 +956,7 @@ const Board = () => {
             const h = Math.abs(selectionBox.current.y - selectionBox.start.y);
 
             const selected = elements.filter(el => {
-                if (el.type === 'rect' || el.type === 'image') {
+                if (el.type === 'rect' || el.type === 'image' || el.type === 'triangle' || el.type === 'diamond' || el.type === 'hexagon' || el.type === 'star') {
                     return el.x >= x && el.x + (el.w || 0) <= x + w &&
                         el.y >= y && el.y + (el.h || 0) <= y + h;
                 } else if (el.type === 'circle') {
@@ -1409,73 +1030,99 @@ const Board = () => {
         setCurrentPos(null);
     };
 
-    const deleteSelected = async () => {
-        if (selectedElements.length === 0) return;
-        const newElements = elements.filter(el => {
-            if (selectedElements.includes(el.id)) return false;
-            if (el.type === 'arrow' && (selectedElements.includes(el.fromId || '') || selectedElements.includes(el.toId || ''))) {
-                return false;
-            }
-            return true;
-        });
+    const deleteSelected = () => {
+        if (isReadOnly()) return;
+        const newElements = deleteElementsUtil(elements, selectedElements);
         setElements(newElements);
         setSelectedElements([]);
-        setShowPropertiesPanel(false);
         addToHistory(newElements);
         emitElements(newElements);
-        setTool('select');
     };
 
     const copySelected = () => {
-        const selectedEls = elements.filter(el => selectedElements.includes(el.id));
-        setClipboard(selectedEls);
-    };
-
-    const cutSelected = () => {
-        copySelected();
-        deleteSelected();
-    };
-
-    const paste = async () => {
-        if (clipboard.length === 0) return;
-        const newElements = clipboard.map(el => ({
-            ...el,
-            id: Date.now().toString() + Math.random(),
-            x: el.x + 20,
-            y: el.y + 20
-        }));
-        const allElements = [...elements, ...newElements];
-        setElements(allElements);
-        setSelectedElements(newElements.map(el => el.id));
-        addToHistory(allElements);
-        emitElements(allElements);
-    };
-
-    const uploadImage = async (file: File): Promise<string | null> => {
-        const formData = new FormData();
-        formData.append('image', file);
-
-        try {
-            const res = await api.post('/api/upload', formData, {
-                headers: {
-                    'Content-Type': 'multipart/form-data'
-                }
-            });
-            return res.data.url;
-        } catch (err) {
-            console.error('Error uploading image:', err);
-            return null;
+        const selectedEls = copyElements(elements, selectedElements);
+        if (selectedEls.length > 0) {
+            navigator.clipboard.writeText(JSON.stringify(selectedEls));
         }
     };
 
+    const cutSelected = () => {
+        if (isReadOnly()) return;
+        const { clipboard, remainingElements } = cutElements(elements, selectedElements);
+        if (clipboard.length > 0) {
+            navigator.clipboard.writeText(JSON.stringify(clipboard));
+            setElements(remainingElements);
+            setSelectedElements([]);
+            addToHistory(remainingElements);
+            emitElements(remainingElements);
+        }
+    };
+
+    const paste = async () => {
+        if (isReadOnly()) return;
+        try {
+            try {
+                const clipboardItems = await navigator.clipboard.read();
+                for (const item of clipboardItems) {
+                    if (item.types.some(type => type.startsWith('image/'))) {
+                        const blob = await item.getType(item.types.find(type => type.startsWith('image/'))!);
+                        const file = new File([blob], "pasted-image.png", { type: blob.type });
+                        const imageUrl = await uploadImage(file);
+                        if (imageUrl) {
+                            const x = -panOffset.x / zoom + 100;
+                            const y = -panOffset.y / zoom + 100;
+                            const newElement: Element = {
+                                id: Date.now().toString(),
+                                type: 'image',
+                                x,
+                                y,
+                                w: 200,
+                                h: 200,
+                                imageUrl: imageUrl
+                            };
+                            const newElements = [...elements, newElement];
+                            setElements(newElements);
+                            addToHistory(newElements);
+                            emitElements(newElements);
+                            return;
+                        }
+                    }
+                }
+            } catch (readError) {
+                console.warn("Clipboard read failed, falling back to text", readError);
+            }
+
+            const text = await navigator.clipboard.readText();
+            const clipboardEls = JSON.parse(text) as Element[];
+            if (Array.isArray(clipboardEls) && clipboardEls.length > 0) {
+                const pastedEls = pasteElements(clipboardEls, { x: 20, y: 20 });
+                const newElements = [...elements, ...pastedEls];
+                setElements(newElements);
+                setSelectedElements(pastedEls.map(e => e.id));
+                addToHistory(newElements);
+                emitElements(newElements);
+            }
+        } catch (err) {
+            console.error('Failed to paste:', err);
+        }
+    };
+
+    const uploadImage = async (file: File) => {
+        const url = await uploadImageUtil(file);
+        return url;
+    };
+
     const handleImageUpload = () => {
+        if (isReadOnly()) return;
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
         input.onchange = async (e: any) => {
             const file = e.target.files[0];
             if (file) {
+                console.log('Uploading image:', file.name);
                 const imageUrl = await uploadImage(file);
+                console.log('Image uploaded, URL:', imageUrl);
                 if (imageUrl) {
                     const newElement: Element = {
                         id: Date.now().toString(),
@@ -1486,11 +1133,16 @@ const Board = () => {
                         h: 200,
                         imageUrl: imageUrl
                     };
+                    console.log('Creating image element:', newElement);
                     const newElements = [...elements, newElement];
                     setElements(newElements);
                     addToHistory(newElements);
                     emitElements(newElements);
                     setTool('select');
+                    console.log('Image element added to board');
+                } else {
+                    console.error('Image upload returned null URL');
+                    alert('Failed to upload image. Please try again.');
                 }
             }
         };
@@ -1498,13 +1150,9 @@ const Board = () => {
     };
 
     const updateSelectedElements = (updates: Partial<Element>) => {
+        if (isReadOnly()) return;
         if (selectedElements.length === 0) return;
-        const newElements = elements.map(el => {
-            if (selectedElements.includes(el.id)) {
-                return { ...el, ...updates };
-            }
-            return el;
-        });
+        const newElements = updateElements(elements, selectedElements, updates);
         setElements(newElements);
         addToHistory(newElements);
         emitElements(newElements);
@@ -1514,46 +1162,18 @@ const Board = () => {
         updateSelectedElements({ color });
     };
 
-    const changeShape = (newType: 'rect' | 'circle') => {
+    const changeShape = (newType: 'rect' | 'circle' | 'triangle' | 'diamond' | 'hexagon' | 'star') => {
+        if (isReadOnly()) return;
         if (selectedElements.length === 0) return;
-        const newElements = elements.map(el => {
-            if (selectedElements.includes(el.id)) {
-                if (el.type === newType) return el;
-
-                const updates: Partial<Element> = { type: newType };
-
-                if (newType === 'circle' && el.type === 'rect') {
-                    // Rect to Circle
-                    const size = Math.min(el.w || 50, el.h || 50);
-                    updates.radius = size / 2;
-                    // Center it (Rect x,y is top-left, Circle x,y is center)
-                    updates.x = el.x + (el.w || 0) / 2;
-                    updates.y = el.y + (el.h || 0) / 2;
-                } else if (newType === 'rect' && el.type === 'circle') {
-                    // Circle to Rect
-                    const r = el.radius || 25;
-                    updates.w = r * 2;
-                    updates.h = r * 2;
-                    // Top-left (Circle x,y is center, Rect x,y is top-left)
-                    updates.x = el.x - r;
-                    updates.y = el.y - r;
-                }
-                return { ...el, ...updates };
-            }
-            return el;
-        });
+        const newElements = changeElementShape(elements, selectedElements, newType);
         setElements(newElements);
         addToHistory(newElements);
         emitElements(newElements);
     };
 
     const updateArrowStyle = (id: string, updates: Partial<Element>) => {
-        const newElements = elements.map(el => {
-            if (el.id === id) {
-                return { ...el, ...updates };
-            }
-            return el;
-        });
+        if (isReadOnly()) return;
+        const newElements = updateElements(elements, [id], updates);
         setElements(newElements);
         addToHistory(newElements);
         emitElements(newElements);
@@ -1561,12 +1181,8 @@ const Board = () => {
     };
 
     const toggleVisibility = (id: string) => {
-        const newElements = elements.map(el => {
-            if (el.id === id) {
-                return { ...el, isHidden: !el.isHidden };
-            }
-            return el;
-        });
+        if (isReadOnly()) return;
+        const newElements = toggleElementVisibility(elements, id);
         setElements(newElements);
         addToHistory(newElements);
         emitElements(newElements);
@@ -1576,6 +1192,10 @@ const Board = () => {
         switch (type) {
             case 'rect': return <Square size={14} />;
             case 'circle': return <Circle size={14} />;
+            case 'triangle': return <Triangle size={14} />;
+            case 'diamond': return <Diamond size={14} />;
+            case 'hexagon': return <Hexagon size={14} />;
+            case 'star': return <Star size={14} />;
             case 'text': return <Type size={14} />;
             case 'image': return <Search size={14} />;
             case 'arrow': return <ArrowRight size={14} />;
@@ -1585,6 +1205,7 @@ const Board = () => {
 
     const handleCanvasDrop = async (e: React.DragEvent) => {
         e.preventDefault();
+        if (isReadOnly()) return;
         const file = e.dataTransfer.files[0];
         if (file && file.type.startsWith('image/')) {
             const { x, y } = getCanvasCoords(e as unknown as React.MouseEvent);
@@ -1616,12 +1237,13 @@ const Board = () => {
         }));
     };
 
-    const handleLayerDragStart = (e: React.DragEvent, index: number) => {
+    const handleLayerDragStart = (_e: React.DragEvent, index: number) => {
         setDraggedLayerIndex(index);
     };
 
     const handleLayerDrop = (e: React.DragEvent, targetIndex: number) => {
         e.preventDefault();
+        if (isReadOnly()) return;
         if (draggedLayerIndex === null) return;
         if (draggedLayerIndex === targetIndex) return;
 
@@ -1638,16 +1260,78 @@ const Board = () => {
         setDraggedLayerIndex(null);
     };
 
+    const updateBoard = async (updates: any) => {
+        if (isReadOnly()) return;
+        try {
+            const res = await api.put(`/api/boards/${id}`, updates);
+            if (res.data.title) setBoardTitle(res.data.title);
+            if (res.data.visibility) setVisibility(res.data.visibility);
+            if (res.data.editors || res.data.viewers) {
+                const editors = (res.data.editors || []).map((u: any) => ({ user: u, role: 'editor' }));
+                const viewers = (res.data.viewers || []).map((u: any) => ({ user: u, role: 'viewer' }));
+                setCollaborators([...editors, ...viewers]);
+            }
+        } catch (err) {
+            console.error("Failed to update board", err);
+        }
+    };
+
+    const insertIcon = (iconPath: string, iconName: string) => {
+        if (isReadOnly()) return;
+        const canvasRect = canvasRef.current?.getBoundingClientRect();
+        const centerX = canvasRect ? (canvasRect.width / 2 - panOffset.x) / zoom : 400;
+        const centerY = canvasRect ? (canvasRect.height / 2 - panOffset.y) / zoom : 300;
+        const newElement: Element = {
+            id: Date.now().toString(),
+            type: 'image',
+            x: centerX - 50,
+            y: centerY - 50,
+            w: 100,
+            h: 100,
+            imageUrl: iconPath, // Use the file path directly
+            color: currentColor,
+            text: iconName,
+        };
+        const newElements = [...elements, newElement];
+        setElements(newElements);
+        addToHistory(newElements);
+        emitElements(newElements);
+        setSelectedElements([newElement.id]);
+    };
+
+    const handleInvite = async () => {
+        if (!inviteEmail) return;
+
+        // Optimistic update not easily possible without user details, so we wait for response
+        // or we could add a temporary placeholder if we wanted.
+
+        try {
+            const res = await api.post(`/api/boards/${id}/collaborators`, { email: inviteEmail, role: inviteRole });
+
+            // Sync with server response
+            const editors = (res.data.editors || []).map((u: any) => ({ user: u, role: 'editor' }));
+            const viewers = (res.data.viewers || []).map((u: any) => ({ user: u, role: 'viewer' }));
+            setCollaborators([...editors, ...viewers]);
+
+            setInviteEmail('');
+        } catch (err: any) {
+            console.error("Invite failed", err);
+            alert(err.response?.data || "Failed to invite user");
+        }
+    };
+
     const handlersRef = useRef({
         undo, redo, paste, setTool, setSelectedElements,
         copySelected, cutSelected, deleteSelected, handleImageUpload,
-        setArrowStart, elements, clipboard, history, historyIndex
+        setArrowStart, elements, history, historyIndex,
+        setShowLayers, isReadOnly
     });
 
     handlersRef.current = {
         undo, redo, paste, setTool, setSelectedElements,
         copySelected, cutSelected, deleteSelected, handleImageUpload,
-        setArrowStart, elements, clipboard, history, historyIndex
+        setArrowStart, elements, history, historyIndex,
+        setShowLayers, isReadOnly
     };
 
     useEffect(() => {
@@ -1657,10 +1341,11 @@ const Board = () => {
             const {
                 undo, redo, paste, setTool, setSelectedElements,
                 copySelected, cutSelected, deleteSelected, handleImageUpload,
-                setArrowStart, elements
+                setArrowStart, elements, setShowLayers, isReadOnly
             } = handlersRef.current;
 
             if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+                if (isReadOnly()) return;
                 e.preventDefault();
                 if (e.shiftKey) {
                     redo();
@@ -1671,6 +1356,7 @@ const Board = () => {
             }
 
             if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+                if (isReadOnly()) return;
                 e.preventDefault();
                 redo();
                 return;
@@ -1679,49 +1365,57 @@ const Board = () => {
             switch (e.key.toLowerCase()) {
                 case 'v':
                     if (e.ctrlKey || e.metaKey) {
+                        if (isReadOnly()) return;
                         e.preventDefault();
                         paste();
                     } else {
                         setTool('select');
                     }
                     break;
+                case 'c':
+                    if (e.ctrlKey || e.metaKey) {
+                        e.preventDefault();
+                        copySelected();
+                    }
+                    break;
                 case 'r':
-                    setTool('rect');
+                    if (!isReadOnly()) setTool('rect');
                     break;
                 case 'o':
-                    setTool('circle');
+                    if (!isReadOnly()) setTool('circle');
                     break;
                 case 't':
-                    setTool('text');
+                    if (!isReadOnly()) setTool('text');
                     break;
                 case 'a':
                     if (e.ctrlKey || e.metaKey) {
                         e.preventDefault();
                         setSelectedElements(elements.map(el => el.id));
                     } else {
-                        setTool('arrow');
+                        if (!isReadOnly()) setTool('arrow');
                     }
                     break;
                 case 'l':
-                    setTool('line');
-                    break;
-                case 'd':
-                    setTool('draw');
+                    if (!isReadOnly()) setTool('line');
                     break;
                 case 'f':
-                    setTool('frame');
+                    if (!isReadOnly()) setTool('frame');
                     break;
                 case 'i':
-                    handleImageUpload();
+                    if (!isReadOnly()) handleImageUpload();
                     break;
                 case 'x':
                     if (e.ctrlKey || e.metaKey) {
+                        if (isReadOnly()) return;
                         e.preventDefault();
                         cutSelected();
+                    } else {
+                        setShowLayers((prev: boolean) => !prev);
                     }
                     break;
                 case 'delete':
                 case 'backspace':
+                    if (isReadOnly()) return;
                     e.preventDefault();
                     deleteSelected();
                     break;
@@ -1752,97 +1446,190 @@ const Board = () => {
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
         };
-    }, []); // Empty dependency array to prevent re-binding
+    }, []);
 
     return (
-        <div className="h-[calc(100vh-80px)] bg-zinc-900 rounded-lg border border-border relative overflow-hidden flex">
-            <div className="absolute top-4 left-4 flex flex-col gap-2 z-10">
-                {/* Top Group */}
-                <div className="bg-card border border-border rounded-lg p-1 flex flex-col gap-1 shadow-lg">
-                    <button className="p-2 rounded hover:bg-secondary text-muted-foreground hover:text-foreground relative group">
-                        <Plus size={20} />
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Insert (I)</span>
-                    </button>
+        <div className="flex flex-col h-screen bg-background text-foreground">
+            {/* Header */}
+            <header className="h-14 border-b border-border flex items-center justify-between px-4 bg-card z-20">
+                <div className="flex items-center gap-4">
+                    <Link to="/dashboard" className="p-2 hover:bg-secondary rounded-full">
+                        <ArrowLeft size={20} />
+                    </Link>
+                    <input
+                        value={boardTitle}
+                        onChange={(e) => updateBoard({ title: e.target.value })}
+                        disabled={isReadOnly()}
+                        className={`bg-transparent font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-primary rounded px-2 ${isReadOnly() ? 'cursor-default opacity-80' : 'hover:bg-secondary/50'}`}
+                    />
                 </div>
+                <div className="flex items-center gap-2">
+                    <div className="flex -space-x-2 mr-4">
+                        {collaborators.map((c, i) => (
+                            c.user && (
+                                <div key={i} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs border-2 border-background" title={c.user.username || 'Unknown'}>
+                                    {c.user.username?.[0]?.toUpperCase() || '?'}
+                                </div>
+                            )
+                        ))}
+                        {user && !collaborators.some(c => (c.user?._id || c.user) === user._id) && (
+                            <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs border-2 border-background" title={user.username + " (You)"}>
+                                {user.username[0].toUpperCase()}
+                            </div>
+                        )}
+                    </div>
 
-                {/* Main Tools Group */}
-                <div className="bg-card border border-border rounded-lg p-1 flex flex-col gap-1 shadow-lg">
+                    <button
+                        onClick={() => setShowShareModal(true)}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors"
+                    >
+                        <Share2 size={16} />
+                        <span className="text-sm font-medium">Share</span>
+                    </button>
+
+                    <div className="relative">
+                        <button
+                            onClick={() => setShowMenuDropdown(!showMenuDropdown)}
+                            className="p-2 hover:bg-secondary rounded"
+                        >
+                            <Menu size={20} />
+                        </button>
+
+                        {showMenuDropdown && (
+                            <div className="absolute right-0 top-full mt-2 w-48 bg-card border border-border rounded-lg shadow-lg py-1 z-50">
+                                <button className="w-full text-left px-4 py-2 text-sm hover:bg-secondary flex items-center gap-2">
+                                    <User size={16} /> Profile
+                                </button>
+                                <Link to="/dashboard" className="w-full text-left px-4 py-2 text-sm hover:bg-secondary flex items-center gap-2">
+                                    <LayoutDashboard size={16} /> Dashboard
+                                </Link>
+                                <div className="h-px bg-border my-1" />
+                                <button onClick={() => {
+                                    localStorage.removeItem('token');
+                                    window.location.href = '/login';
+                                }} className="w-full text-left px-4 py-2 text-sm hover:bg-secondary text-destructive flex items-center gap-2">
+                                    <LogOut size={16} /> Logout
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </header>
+            {/* Toolbar */}
+            {!isReadOnly() && (
+                <div className="absolute top-20 left-4 flex flex-col gap-2 bg-card border border-border p-2 rounded-lg shadow-lg z-20">
+                    {/* Select Tool */}
                     <button
                         onClick={() => setTool('select')}
-                        className={`p-2 rounded relative group ${tool === 'select' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                        className={`p-2 rounded relative group flex flex-col items-center gap-1 ${tool === 'select' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
                     >
-                        <MousePointer size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">V</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Select</span>
+                        <MousePointer2 size={20} />
+                        <span className="text-[9px] opacity-70">V</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Select (V)</span>
                     </button>
 
-                    <button
-                        onClick={() => setTool('rect')}
-                        className={`p-2 rounded relative group ${tool === 'rect' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <Square size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">R</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Rectangle</span>
-                    </button>
+                    {/* Shape Tool with Submenu */}
+                    <div className="relative group">
+                        <button
+                            className={`p-2 rounded flex flex-col items-center gap-1 ${['rect', 'circle', 'triangle', 'diamond', 'hexagon', 'star'].includes(tool) ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                        >
+                            {tool === 'circle' ? <Circle size={20} /> :
+                                tool === 'triangle' ? <Triangle size={20} /> :
+                                    tool === 'diamond' ? <Diamond size={20} /> :
+                                        tool === 'hexagon' ? <Hexagon size={20} /> :
+                                            tool === 'star' ? <Star size={20} /> :
+                                                <Square size={20} />}
+                            <span className="text-[9px] opacity-70">R</span>
+                        </button>
+                        <div className="absolute left-full top-0 ml-2 bg-card border border-border rounded-lg shadow-lg p-2 grid grid-cols-2 gap-2 w-32 hidden group-hover:grid z-50">
+                            <button onClick={() => setTool('rect')} className={`p-2 rounded hover:bg-secondary flex justify-center ${tool === 'rect' ? 'bg-primary/20 text-primary' : ''}`} title="Rectangle"><Square size={20} /></button>
+                            <button onClick={() => setTool('circle')} className={`p-2 rounded hover:bg-secondary flex justify-center ${tool === 'circle' ? 'bg-primary/20 text-primary' : ''}`} title="Circle"><Circle size={20} /></button>
+                            <button onClick={() => setTool('triangle')} className={`p-2 rounded hover:bg-secondary flex justify-center ${tool === 'triangle' ? 'bg-primary/20 text-primary' : ''}`} title="Triangle"><Triangle size={20} /></button>
+                            <button onClick={() => setTool('diamond')} className={`p-2 rounded hover:bg-secondary flex justify-center ${tool === 'diamond' ? 'bg-primary/20 text-primary' : ''}`} title="Diamond"><Diamond size={20} /></button>
+                            <button onClick={() => setTool('hexagon')} className={`p-2 rounded hover:bg-secondary flex justify-center ${tool === 'hexagon' ? 'bg-primary/20 text-primary' : ''}`} title="Hexagon"><Hexagon size={20} /></button>
+                            <button onClick={() => setTool('star')} className={`p-2 rounded hover:bg-secondary flex justify-center ${tool === 'star' ? 'bg-primary/20 text-primary' : ''}`} title="Star"><Star size={20} /></button>
+                        </div>
+                    </div>
 
-                    <button
-                        onClick={() => setTool('circle')}
-                        className={`p-2 rounded relative group ${tool === 'circle' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <Circle size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">O</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Circle</span>
-                    </button>
-
+                    {/* Arrow Tool */}
                     <button
                         onClick={() => setTool('arrow')}
-                        className={`p-2 rounded relative group ${tool === 'arrow' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                        className={`p-2 rounded relative group flex flex-col items-center gap-1 ${tool === 'arrow' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
                     >
                         <ArrowRight size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">A</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Arrow</span>
+                        <span className="text-[9px] opacity-70">A</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Arrow (A)</span>
                     </button>
 
+                    {/* Line Tool */}
                     <button
                         onClick={() => setTool('line')}
-                        className={`p-2 rounded relative group ${tool === 'line' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                        className={`p-2 rounded relative group flex flex-col items-center gap-1 ${tool === 'line' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
                     >
                         <Minus size={20} className="rotate-45" />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">L</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Line</span>
+                        <span className="text-[9px] opacity-70">L</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Line (L)</span>
                     </button>
 
-                    <button
-                        onClick={() => setTool('draw')}
-                        className={`p-2 rounded relative group ${tool === 'draw' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <Activity size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">D</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Draw</span>
-                    </button>
-
+                    {/* Text Tool */}
                     <button
                         onClick={() => setTool('text')}
-                        className={`p-2 rounded relative group ${tool === 'text' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
+                        className={`p-2 rounded relative group flex flex-col items-center gap-1 ${tool === 'text' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
                     >
                         <Type size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">T</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Text</span>
+                        <span className="text-[9px] opacity-70">T</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Text (T)</span>
                     </button>
 
+                    {/* Image Tool */}
                     <button
                         onClick={handleImageUpload}
-                        className={`p-2 rounded relative group hover:bg-secondary text-muted-foreground hover:text-foreground`}
+                        className={`p-2 rounded relative group flex flex-col items-center gap-1 hover:bg-secondary text-muted-foreground hover:text-foreground`}
                     >
-                        <Search size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">I</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Image</span>
+                        <Image size={20} />
+                        <span className="text-[9px] opacity-70">I</span>
+                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Image (I)</span>
                     </button>
-                </div>
-            </div>
 
-            <div className="flex-1 relative">
-                <div className="absolute top-4 right-4 flex gap-2 z-10">
+                    {/* Divider */}
+                    <div className="h-px bg-border my-1" />
+
+                    {/* Icons Panel */}
+                    <div className="relative group">
+                        <button
+                            className="p-2 rounded flex flex-col items-center gap-1 hover:bg-secondary text-muted-foreground hover:text-foreground"
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                                <polyline points="21 15 16 10 5 21"></polyline>
+                            </svg>
+                            <span className="text-[9px] opacity-70">⌘K</span>
+                        </button>
+
+                        {/* Icons Submenu */}
+                        <div className="absolute left-full top-0 ml-2 bg-card border border-border rounded-lg shadow-lg p-3 w-80 max-h-[500px] hidden group-hover:flex flex-col z-50">
+                            <div className="mb-3">
+                                <div className="relative">
+                                    <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                                    <input
+                                        type="text"
+                                        placeholder="Search icons..."
+                                        className="w-full pl-8 pr-3 py-2 bg-background border border-border rounded text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="text-xs font-semibold text-muted-foreground mb-2">Brand Icons</div>
+
+                        </div>
+                    </div>
+                </div>
+            )}
+
+
+            <div className="flex-1 relative overflow-hidden">
+                <div className="absolute top-4 right-6 flex gap-2 z-10">
                     <button
                         onClick={() => setTool('pan')}
                         className={`p-2 rounded border border-border shadow-sm ${tool === 'pan' ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-secondary text-muted-foreground'}`}
@@ -1860,7 +1647,7 @@ const Board = () => {
                 </div>
 
                 {showLayers && (
-                    <div className="absolute top-16 right-4 w-64 bg-card border border-border rounded-lg shadow-lg flex flex-col max-h-[calc(100vh-100px)] z-20">
+                    <div className="absolute top-16 right-4 w-64 bg-card border border-border rounded-lg shadow-lg flex flex-col max-h-[calc(100%-5rem)] z-20">
                         <div className="p-2 border-b border-border font-bold text-sm flex justify-between items-center">
                             <span>Layers</span>
                             <span className="text-xs text-muted-foreground">{elements.length} elements</span>
@@ -1973,20 +1760,32 @@ const Board = () => {
                         className="absolute bg-card border border-border rounded shadow-lg p-1 z-50 flex flex-col min-w-[200px]"
                         style={{ left: contextMenu.x, top: contextMenu.y }}
                     >
-                        <button onClick={cutSelected} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                        <button
+                            onClick={cutSelected}
+                            disabled={!contextMenu.elementId}
+                            className={`flex items-center gap-2 p-2 rounded text-xs text-left ${!contextMenu.elementId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-secondary'}`}
+                        >
                             <Scissors size={14} /> <span>Cut</span> <span className="ml-auto text-muted-foreground">Ctrl X</span>
                         </button>
-                        <button onClick={copySelected} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                        <button
+                            onClick={copySelected}
+                            disabled={!contextMenu.elementId}
+                            className={`flex items-center gap-2 p-2 rounded text-xs text-left ${!contextMenu.elementId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-secondary'}`}
+                        >
                             <Copy size={14} /> <span>Copy</span> <span className="ml-auto text-muted-foreground">Ctrl C</span>
                         </button>
                         <button onClick={paste} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
                             <Clipboard size={14} /> <span>Paste</span> <span className="ml-auto text-muted-foreground">Ctrl V</span>
                         </button>
-                        <button onClick={() => { copySelected(); paste(); }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                        <button
+                            onClick={() => { copySelected(); paste(); }}
+                            disabled={!contextMenu.elementId}
+                            className={`flex items-center gap-2 p-2 rounded text-xs text-left ${!contextMenu.elementId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-secondary'}`}
+                        >
                             <Copy size={14} /> <span>Duplicate</span> <span className="ml-auto text-muted-foreground">Ctrl D</span>
                         </button>
                         <button onClick={() => setSelectedElements(elements.map(e => e.id))} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
-                            <MousePointer size={14} /> <span>Select all</span> <span className="ml-auto text-muted-foreground">Ctrl A</span>
+                            <MousePointer2 size={14} /> <span>Select all</span> <span className="ml-auto text-muted-foreground">Ctrl A</span>
                         </button>
 
                         <div className="h-px bg-border my-1" />
@@ -1998,64 +1797,73 @@ const Board = () => {
                         <div className="h-px bg-border my-1" />
 
                         <div className="relative group/order">
-                            <button className="w-full flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                            <button
+                                disabled={!contextMenu.elementId}
+                                className={`w-full flex items-center gap-2 p-2 rounded text-xs text-left ${!contextMenu.elementId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-secondary'}`}
+                            >
                                 <BringToFront size={14} /> <span>Change Order</span> <ArrowRight size={12} className="ml-auto" />
                             </button>
-                            <div className="absolute left-full top-0 ml-1 bg-card border border-border rounded shadow-lg p-1 flex-col min-w-[150px] hidden group-hover/order:flex">
-                                <button onClick={() => {
-                                    // Bring forward
-                                    const idx = elements.findIndex(e => e.id === contextMenu.elementId);
-                                    if (idx < elements.length - 1) {
-                                        const newEls = [...elements];
-                                        [newEls[idx], newEls[idx + 1]] = [newEls[idx + 1], newEls[idx]];
-                                        setElements(newEls);
-                                        emitElements(newEls);
-                                    }
-                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
-                                    <span>Bring forward</span> <span className="ml-auto text-muted-foreground">Ctrl ]</span>
-                                </button>
-                                <button onClick={() => {
-                                    // Send backward
-                                    const idx = elements.findIndex(e => e.id === contextMenu.elementId);
-                                    if (idx > 0) {
-                                        const newEls = [...elements];
-                                        [newEls[idx], newEls[idx - 1]] = [newEls[idx - 1], newEls[idx]];
-                                        setElements(newEls);
-                                        emitElements(newEls);
-                                    }
-                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
-                                    <span>Send backward</span> <span className="ml-auto text-muted-foreground">Ctrl [</span>
-                                </button>
-                                <button onClick={() => {
-                                    // Bring to front
-                                    const newEls = elements.filter(e => e.id !== contextMenu.elementId);
-                                    const el = elements.find(e => e.id === contextMenu.elementId);
-                                    if (el) {
-                                        newEls.push(el);
-                                        setElements(newEls);
-                                        emitElements(newEls);
-                                    }
-                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
-                                    <span>Bring to front</span> <span className="ml-auto text-muted-foreground">]</span>
-                                </button>
-                                <button onClick={() => {
-                                    // Send to back
-                                    const newEls = elements.filter(e => e.id !== contextMenu.elementId);
-                                    const el = elements.find(e => e.id === contextMenu.elementId);
-                                    if (el) {
-                                        newEls.unshift(el);
-                                        setElements(newEls);
-                                        emitElements(newEls);
-                                    }
-                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
-                                    <span>Send to back</span> <span className="ml-auto text-muted-foreground">[</span>
-                                </button>
-                            </div>
+                            {contextMenu.elementId && (
+                                <div className="absolute left-full top-0 ml-1 bg-card border border-border rounded shadow-lg p-1 flex-col min-w-[150px] hidden group-hover/order:flex">
+                                    <button onClick={() => {
+                                        // Bring forward
+                                        const idx = elements.findIndex(e => e.id === contextMenu.elementId);
+                                        if (idx < elements.length - 1) {
+                                            const newEls = [...elements];
+                                            [newEls[idx], newEls[idx + 1]] = [newEls[idx + 1], newEls[idx]];
+                                            setElements(newEls);
+                                            emitElements(newEls);
+                                        }
+                                    }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                        <span>Bring forward</span> <span className="ml-auto text-muted-foreground">Ctrl ]</span>
+                                    </button>
+                                    <button onClick={() => {
+                                        // Send backward
+                                        const idx = elements.findIndex(e => e.id === contextMenu.elementId);
+                                        if (idx > 0) {
+                                            const newEls = [...elements];
+                                            [newEls[idx], newEls[idx - 1]] = [newEls[idx - 1], newEls[idx]];
+                                            setElements(newEls);
+                                            emitElements(newEls);
+                                        }
+                                    }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                        <span>Send backward</span> <span className="ml-auto text-muted-foreground">Ctrl [</span>
+                                    </button>
+                                    <button onClick={() => {
+                                        // Bring to front
+                                        const newEls = elements.filter(e => e.id !== contextMenu.elementId);
+                                        const el = elements.find(e => e.id === contextMenu.elementId);
+                                        if (el) {
+                                            newEls.push(el);
+                                            setElements(newEls);
+                                            emitElements(newEls);
+                                        }
+                                    }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                        <span>Bring to front</span> <span className="ml-auto text-muted-foreground">]</span>
+                                    </button>
+                                    <button onClick={() => {
+                                        // Send to back
+                                        const newEls = elements.filter(e => e.id !== contextMenu.elementId);
+                                        const el = elements.find(e => e.id === contextMenu.elementId);
+                                        if (el) {
+                                            newEls.unshift(el);
+                                            setElements(newEls);
+                                            emitElements(newEls);
+                                        }
+                                    }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                        <span>Send to back</span> <span className="ml-auto text-muted-foreground">[</span>
+                                    </button>
+                                </div>
+                            )}
                         </div>
 
                         <div className="h-px bg-border my-1" />
 
-                        <button onClick={deleteSelected} className="flex items-center gap-2 p-2 hover:bg-red-500/10 text-red-500 rounded text-xs text-left">
+                        <button
+                            onClick={deleteSelected}
+                            disabled={!contextMenu.elementId}
+                            className={`flex items-center gap-2 p-2 rounded text-xs text-left ${!contextMenu.elementId ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-500/10 text-red-500'}`}
+                        >
                             <Trash2 size={14} /> <span>Delete</span> <span className="ml-auto">Del</span>
                         </button>
 
@@ -2107,48 +1915,53 @@ const Board = () => {
                         </div>
 
                         {/* Background Color Picker (for shapes) */}
-                        {(elements.find(el => el.id === selectedElements[0])?.type === 'rect' || elements.find(el => el.id === selectedElements[0])?.type === 'circle') && (
-                            <div className="relative group">
-                                <button
-                                    className="p-2 hover:bg-secondary rounded border border-border"
-                                    title="Background Color"
-                                >
-                                    <div
-                                        className="w-4 h-4 rounded-sm border border-gray-500"
-                                        style={{ backgroundColor: elements.find(el => el.id === selectedElements[0])?.backgroundColor || 'transparent' }}
-                                    />
-                                </button>
-                                <div className="absolute bottom-full left-0 mb-0 hidden group-hover:block bg-card p-2 rounded border border-border shadow-lg flex flex-col gap-2">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs">Fill:</span>
-                                        <input
-                                            type="color"
-                                            defaultValue={elements.find(el => el.id === selectedElements[0])?.backgroundColor || '#ffffff'}
-                                            onBlur={(e) => updateSelectedElements({ backgroundColor: e.target.value })}
-                                            className="w-24 h-6 cursor-pointer"
+                        {(elements.find(el => el.id === selectedElements[0])?.type === 'rect' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'circle' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'triangle' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'diamond' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'hexagon' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'star') && (
+                                <div className="relative group">
+                                    <button
+                                        className="p-2 hover:bg-secondary rounded border border-border"
+                                        title="Background Color"
+                                    >
+                                        <div
+                                            className="w-4 h-4 rounded-sm border border-gray-500"
+                                            style={{ backgroundColor: elements.find(el => el.id === selectedElements[0])?.backgroundColor || 'transparent' }}
                                         />
-                                        <button
-                                            onClick={() => updateSelectedElements({ backgroundColor: undefined })}
-                                            className="text-xs text-red-500 hover:underline"
-                                        >
-                                            Clear
-                                        </button>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs">Opacity:</span>
-                                        <input
-                                            type="range"
-                                            min="0.1"
-                                            max="1"
-                                            step="0.1"
-                                            defaultValue={elements.find(el => el.id === selectedElements[0])?.opacity || 1}
-                                            onMouseUp={(e) => updateSelectedElements({ opacity: parseFloat((e.target as HTMLInputElement).value) })}
-                                            className="w-24"
-                                        />
+                                    </button>
+                                    <div className="absolute bottom-full left-0 mb-0 hidden group-hover:block bg-card p-2 rounded border border-border shadow-lg flex flex-col gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs">Fill:</span>
+                                            <input
+                                                type="color"
+                                                defaultValue={elements.find(el => el.id === selectedElements[0])?.backgroundColor || '#ffffff'}
+                                                onBlur={(e) => updateSelectedElements({ backgroundColor: e.target.value })}
+                                                className="w-24 h-6 cursor-pointer"
+                                            />
+                                            <button
+                                                onClick={() => updateSelectedElements({ backgroundColor: undefined })}
+                                                className="text-xs text-red-500 hover:underline"
+                                            >
+                                                Clear
+                                            </button>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs">Opacity:</span>
+                                            <input
+                                                type="range"
+                                                min="0.1"
+                                                max="1"
+                                                step="0.1"
+                                                defaultValue={elements.find(el => el.id === selectedElements[0])?.opacity || 1}
+                                                onMouseUp={(e) => updateSelectedElements({ opacity: parseFloat((e.target as HTMLInputElement).value) })}
+                                                className="w-24"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        )}
+                            )}
 
                         <div className="w-px h-6 bg-border mx-1" />
 
@@ -2242,40 +2055,73 @@ const Board = () => {
                         )}
 
                         {/* Shape Options */}
-                        {(elements.find(el => el.id === selectedElements[0])?.type === 'rect' || elements.find(el => el.id === selectedElements[0])?.type === 'circle') && (
-                            <>
-                                <div className="flex bg-secondary/50 rounded p-1 gap-1">
-                                    <button
-                                        onClick={() => changeShape('rect')}
-                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'rect' ? 'bg-primary text-primary-foreground' : ''}`}
-                                        title="Rectangle"
-                                    >
-                                        <Square size={16} />
-                                    </button>
-                                    <button
-                                        onClick={() => changeShape('circle')}
-                                        className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'circle' ? 'bg-primary text-primary-foreground' : ''}`}
-                                        title="Circle"
-                                    >
-                                        <Circle size={16} />
-                                    </button>
-                                </div>
+                        {(elements.find(el => el.id === selectedElements[0])?.type === 'rect' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'circle' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'triangle' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'diamond' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'hexagon' ||
+                            elements.find(el => el.id === selectedElements[0])?.type === 'star') && (
+                                <>
+                                    <div className="flex bg-secondary/50 rounded p-1 gap-1">
+                                        <button
+                                            onClick={() => changeShape('rect')}
+                                            className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'rect' ? 'bg-primary text-primary-foreground' : ''}`}
+                                            title="Rectangle"
+                                        >
+                                            <Square size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => changeShape('circle')}
+                                            className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'circle' ? 'bg-primary text-primary-foreground' : ''}`}
+                                            title="Circle"
+                                        >
+                                            <Circle size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => changeShape('triangle')}
+                                            className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'triangle' ? 'bg-primary text-primary-foreground' : ''}`}
+                                            title="Triangle"
+                                        >
+                                            <Triangle size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => changeShape('diamond')}
+                                            className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'diamond' ? 'bg-primary text-primary-foreground' : ''}`}
+                                            title="Diamond"
+                                        >
+                                            <Diamond size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => changeShape('hexagon')}
+                                            className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'hexagon' ? 'bg-primary text-primary-foreground' : ''}`}
+                                            title="Hexagon"
+                                        >
+                                            <Hexagon size={16} />
+                                        </button>
+                                        <button
+                                            onClick={() => changeShape('star')}
+                                            className={`p-1.5 rounded hover:bg-secondary ${elements.find(el => el.id === selectedElements[0])?.type === 'star' ? 'bg-primary text-primary-foreground' : ''}`}
+                                            title="Star"
+                                        >
+                                            <Star size={16} />
+                                        </button>
+                                    </div>
 
-                                <div className="flex items-center gap-1 px-1">
-                                    <Minus size={14} className="text-muted-foreground" />
-                                    <input
-                                        type="range"
-                                        min="1"
-                                        max="10"
-                                        defaultValue={elements.find(el => el.id === selectedElements[0])?.strokeWidth || 2}
-                                        onMouseUp={(e) => updateSelectedElements({ strokeWidth: parseInt((e.target as HTMLInputElement).value) })}
-                                        className="w-16 h-1 bg-secondary rounded-lg appearance-none cursor-pointer"
-                                    />
-                                </div>
+                                    <div className="flex items-center gap-1 px-1">
+                                        <Minus size={14} className="text-muted-foreground" />
+                                        <input
+                                            type="range"
+                                            min="1"
+                                            max="10"
+                                            defaultValue={elements.find(el => el.id === selectedElements[0])?.strokeWidth || 2}
+                                            onMouseUp={(e) => updateSelectedElements({ strokeWidth: parseInt((e.target as HTMLInputElement).value) })}
+                                            className="w-16 h-1 bg-secondary rounded-lg appearance-none cursor-pointer"
+                                        />
+                                    </div>
 
-                                <div className="w-px h-6 bg-border mx-1" />
-                            </>
-                        )}
+                                    <div className="w-px h-6 bg-border mx-1" />
+                                </>
+                            )}
 
                         {/* Arrow Specific Controls */}
                         {elements.find(el => el.id === selectedElements[0])?.type === 'arrow' && (
@@ -2384,7 +2230,121 @@ const Board = () => {
                     <div className="hidden"></div>
                 )}
             </div>
+
+            {/* Share Modal */}
+            {showShareModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+                    <div className="bg-card border border-border rounded-lg shadow-lg p-6 w-96">
+                        <div className="flex justify-between items-center mb-4">
+                            <h2 className="text-xl font-bold">Share Board</h2>
+                            <button onClick={() => setShowShareModal(false)} className="text-muted-foreground hover:text-foreground">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        <div className="mb-6">
+                            <label className="block text-sm font-medium mb-2">Visibility</label>
+                            <div className="flex gap-2 p-1 bg-secondary rounded-lg">
+                                <button
+                                    onClick={() => updateBoard({ visibility: 'private' })}
+                                    className={`flex-1 py-1 px-2 rounded text-sm ${visibility === 'private' ? 'bg-background shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                >
+                                    <Lock size={14} className="inline mr-1" /> Private
+                                </button>
+                                <button
+                                    onClick={() => updateBoard({ visibility: 'public-view' })}
+                                    className={`flex-1 py-1 px-2 rounded text-sm ${visibility === 'public-view' ? 'bg-background shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                >
+                                    <Globe size={14} className="inline mr-1" /> Public View
+                                </button>
+                                <button
+                                    onClick={() => updateBoard({ visibility: 'public-edit' })}
+                                    className={`flex-1 py-1 px-2 rounded text-sm ${visibility === 'public-edit' ? 'bg-background shadow' : 'text-muted-foreground hover:text-foreground'}`}
+                                >
+                                    <Globe size={14} className="inline mr-1" /> Public Edit
+                                </button>
+                            </div>
+                        </div>
+
+                        <div className="mb-4">
+                            <label className="block text-sm font-medium mb-2">Invite Collaborator</label>
+                            <div className="flex gap-2">
+                                <input
+                                    type="email"
+                                    placeholder="Email address"
+                                    value={inviteEmail}
+                                    onChange={(e) => setInviteEmail(e.target.value)}
+                                    className="flex-1 bg-background border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                                />
+                                <select
+                                    value={inviteRole}
+                                    onChange={(e) => setInviteRole(e.target.value as 'viewer' | 'editor')}
+                                    className="bg-background border border-border rounded px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                                >
+                                    <option value="viewer">Viewer</option>
+                                    <option value="editor">Editor</option>
+                                </select>
+                                <button
+                                    onClick={handleInvite}
+                                    className="bg-primary text-primary-foreground px-3 py-2 rounded text-sm hover:bg-primary/90"
+                                >
+                                    Invite
+                                </button>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium mb-2">Collaborators</label>
+                            <div className="space-y-2 max-h-40 overflow-y-auto">
+                                {collaborators.map((c, i) => (
+                                    <div key={i} className="flex justify-between items-center p-2 bg-secondary/50 rounded relative">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs">
+                                                {c.user.username?.[0]?.toUpperCase() || '?'}
+                                            </div>
+                                            <span className="text-sm">{c.user.username || 'Unknown'}</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs text-muted-foreground capitalize">{c.role}</span>
+                                            {ownerId === user?._id && (c.user?._id || c.user) !== user?._id && (
+                                                <div className="relative">
+                                                    <button
+                                                        onClick={() => setActiveCollaboratorMenu(activeCollaboratorMenu === (c.user?._id || c.user) ? null : (c.user?._id || c.user))}
+                                                        className="p-1 hover:bg-secondary rounded"
+                                                    >
+                                                        <MoreVertical size={14} />
+                                                    </button>
+                                                    {activeCollaboratorMenu === (c.user?._id || c.user) && (
+                                                        <div className="absolute right-0 top-full mt-1 w-32 bg-card border border-border rounded shadow-lg py-1 z-50">
+                                                            <button
+                                                                onClick={() => handleUpdateCollaboratorRole(c.user?._id || c.user, c.role === 'viewer' ? 'editor' : 'viewer')}
+                                                                className="w-full text-left px-3 py-1.5 text-xs hover:bg-secondary"
+                                                            >
+                                                                Make {c.role === 'viewer' ? 'Editor' : 'Viewer'}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleRemoveCollaborator(c.user?._id || c.user)}
+                                                                className="w-full text-left px-3 py-1.5 text-xs hover:bg-secondary text-destructive"
+                                                            >
+                                                                Remove
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                                {collaborators.length === 0 && (
+                                    <div className="text-sm text-muted-foreground text-center py-2">No collaborators yet</div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
-    );
+    )
 };
 export default Board;
+

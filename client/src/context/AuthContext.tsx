@@ -3,6 +3,7 @@ import { createContext, useEffect, useReducer, type ReactNode, type Dispatch } f
 interface User {
     _id: string;
     username: string;
+    displayName?: string;
     email: string;
     token: string;
 }
