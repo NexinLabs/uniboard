@@ -4,14 +4,15 @@ import { AuthContext } from '../context/AuthContext';
 import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
 import {
-    Square, Circle, Type, Image as ImageIcon, Trash2, MousePointer,
-    ArrowRight, Copy, Clipboard, Palette, Undo, Redo, Hand,
+    Square, Circle, Type,  Trash2, MousePointer,
+    ArrowRight, Hand,
     Minus, CornerDownRight, Activity, ArrowLeft, ArrowLeftRight,
-    Plus, Sparkles, MessageSquare, Frame, Search, AlignLeft, AlignCenter, AlignRight,
-    Bold, Italic, Underline
+    Plus, Sparkles, Frame, Search, AlignLeft, AlignCenter, AlignRight,
+    Layers, Eye, EyeOff, Copy, Scissors, Clipboard, MoreHorizontal,
+    BringToFront, SendToBack, Group, Download
 } from 'lucide-react';
 
-type Tool = 'select' | 'rect' | 'circle' | 'text' | 'image' | 'arrow' | 'line' | 'draw' | 'frame' | 'comment' | 'pan';
+type Tool = 'select' | 'rect' | 'circle' | 'text' | 'image' | 'arrow' | 'line' | 'draw' | 'frame' | 'pan';
 
 interface ConnectionPoint {
     x: number;
@@ -49,7 +50,50 @@ interface Element {
     strokeWidth?: number;
     textColor?: string;
     textWrap?: boolean;
+    controlPoint?: { x: number, y: number };
+    isHidden?: boolean;
+    isLocked?: boolean;
 }
+
+const distanceToSegment = (p: {x: number, y: number}, a: {x: number, y: number}, b: {x: number, y: number}) => {
+    const A = p.x - a.x;
+    const B = p.y - a.y;
+    const C = b.x - a.x;
+    const D = b.y - a.y;
+
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    let param = -1;
+    if (lenSq !== 0) param = dot / lenSq;
+
+    let xx, yy;
+
+    if (param < 0) {
+        xx = a.x;
+        yy = a.y;
+    } else if (param > 1) {
+        xx = b.x;
+        yy = b.y;
+    } else {
+        xx = a.x + param * C;
+        yy = a.y + param * D;
+    }
+
+    const dx = p.x - xx;
+    const dy = p.y - yy;
+    return Math.sqrt(dx * dx + dy * dy);
+};
+
+const distanceToBezier = (p: {x: number, y: number}, p0: {x: number, y: number}, p1: {x: number, y: number}, p2: {x: number, y: number}, p3: {x: number, y: number}) => {
+    let minDst = Infinity;
+    for (let t = 0; t <= 1; t += 0.05) {
+        const x = Math.pow(1-t, 3)*p0.x + 3*Math.pow(1-t, 2)*t*p1.x + 3*(1-t)*t*t*p2.x + t*t*t*p3.x;
+        const y = Math.pow(1-t, 3)*p0.y + 3*Math.pow(1-t, 2)*t*p1.y + 3*(1-t)*t*t*p2.y + t*t*t*p3.y;
+        const d = Math.sqrt(Math.pow(p.x - x, 2) + Math.pow(p.y - y, 2));
+        if (d < minDst) minDst = d;
+    }
+    return minDst;
+};
 
 const getWrappedLines = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
     const words = text.split(' ');
@@ -100,11 +144,84 @@ const Board = () => {
     // New state for advanced features
     const [editingElementId, setEditingElementId] = useState<string | null>(null);
     const [resizeHandle, setResizeHandle] = useState<ResizeHandle | null>(null);
+    const [arrowHandle, setArrowHandle] = useState<{ type: 'start' | 'end' | 'control', x: number, y: number } | null>(null);
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number, elementId: string } | null>(null);
+    const [showLayers, setShowLayers] = useState(false);
+    const [draggedLayerIndex, setDraggedLayerIndex] = useState<number | null>(null);
 
     const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState(false);
     const zoom = 1;
+
+    const getArrowHandles = (el: Element): { type: 'start' | 'end' | 'control', x: number, y: number }[] => {
+        if (el.type !== 'arrow') return [];
+        const handles: { type: 'start' | 'end' | 'control', x: number, y: number }[] = [];
+        
+        let fromPoint = el.startPoint;
+        let toPoint = el.endPoint;
+
+        if (el.fromId && el.fromPoint) {
+            const fromEl = elements.find(e => e.id === el.fromId);
+            if (fromEl) {
+                const fromPoints = getConnectionPoints(fromEl);
+                fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
+            }
+        }
+        
+        if (el.toId && el.toPoint) {
+            const toEl = elements.find(e => e.id === el.toId);
+            if (toEl) {
+                const toPoints = getConnectionPoints(toEl);
+                toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
+            }
+        }
+
+        if (fromPoint) handles.push({ type: 'start', x: fromPoint.x, y: fromPoint.y });
+        if (toPoint) handles.push({ type: 'end', x: toPoint.x, y: toPoint.y });
+
+        if (el.arrowType === 'elbow' && fromPoint && toPoint) {
+            const points = getArrowPoints(el);
+            // We want the handle on the "middle" segment.
+            // getArrowPoints returns [Start, P1, P2, End] for Z-shape.
+            // Middle segment is P1 -> P2.
+            if (points.length >= 3) {
+                // If 4 points: S -> P1 -> P2 -> E. Middle is P1-P2.
+                // If 3 points (aligned): S -> P1 -> E. Middle is P1-E? No, usually 4 points for elbow unless aligned.
+                
+                // Let's stick to the previous logic for handle placement as it was robust enough
+                // But we can use the points to be sure.
+                
+                // Actually, the previous logic was:
+                // if vertical start: handle at (midX, midY) where midX is variable, midY is fixed?
+                // No, if vertical start: S -> (S.x, midY) -> (E.x, midY) -> E.
+                // The middle segment is horizontal: y = midY.
+                // We want to drag it vertically? No, we drag the horizontal segment up/down.
+                // So handle should be at ((S.x + E.x)/2, midY).
+                
+                let midX = (fromPoint.x + toPoint.x) / 2;
+                let midY = (fromPoint.y + toPoint.y) / 2;
+
+                if (el.controlPoint) {
+                    midX = el.controlPoint.x;
+                    midY = el.controlPoint.y;
+                }
+
+                const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
+                
+                if (isVerticalStart) {
+                    // Middle segment is horizontal at y=midY. We drag it up/down.
+                    // Handle should be at center of that segment.
+                    // Segment is from (fromPoint.x, midY) to (toPoint.x, midY).
+                    handles.push({ type: 'control', x: (fromPoint.x + toPoint.x) / 2, y: midY });
+                } else {
+                    // Middle segment is vertical at x=midX. We drag it left/right.
+                    handles.push({ type: 'control', x: midX, y: (fromPoint.y + toPoint.y) / 2 });
+                }
+            }
+        }
+
+        return handles;
+    };
 
     const getResizeHandles = (el: Element): { type: ResizeHandle, x: number, y: number }[] => {
         if (el.type === 'rect' || el.type === 'image') {
@@ -249,14 +366,18 @@ const Board = () => {
     };
 
     const getConnectionPoints = (el: Element): ConnectionPoint[] => {
-        if (el.type === 'rect') {
-            const centerX = el.x + (el.w || 0) / 2;
-            const centerY = el.y + (el.h || 0) / 2;
+        if (el.type === 'rect' || el.type === 'image') {
+            const x = el.x;
+            const y = el.y;
+            const w = el.w || (el.type === 'image' ? 200 : 0);
+            const h = el.h || (el.type === 'image' ? 200 : 0);
+            const centerX = x + w / 2;
+            const centerY = y + h / 2;
             return [
-                { x: centerX, y: el.y, position: 'top' },
-                { x: el.x + (el.w || 0), y: centerY, position: 'right' },
-                { x: centerX, y: el.y + (el.h || 0), position: 'bottom' },
-                { x: el.x, y: centerY, position: 'left' },
+                { x: centerX, y: y, position: 'top' },
+                { x: x + w, y: centerY, position: 'right' },
+                { x: centerX, y: y + h, position: 'bottom' },
+                { x: x, y: centerY, position: 'left' },
             ];
         } else if (el.type === 'circle') {
             const r = el.radius || 0;
@@ -270,6 +391,75 @@ const Board = () => {
         return [];
     };
 
+    const getArrowPoints = (el: Element): {x: number, y: number}[] => {
+        let fromPoint = el.startPoint;
+        let toPoint = el.endPoint;
+
+        if (el.fromId && el.fromPoint) {
+            const fromEl = elements.find(e => e.id === el.fromId);
+            if (fromEl) {
+                const fromPoints = getConnectionPoints(fromEl);
+                fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
+            }
+        }
+        
+        if (el.toId && el.toPoint) {
+            const toEl = elements.find(e => e.id === el.toId);
+            if (toEl) {
+                const toPoints = getConnectionPoints(toEl);
+                toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
+            }
+        }
+
+        if (!fromPoint || !toPoint) return [];
+
+        const points: {x: number, y: number}[] = [{x: fromPoint.x, y: fromPoint.y}];
+
+        if (el.arrowType === 'elbow') {
+            let midX = (fromPoint.x + toPoint.x) / 2;
+            let midY = (fromPoint.y + toPoint.y) / 2;
+
+            if (el.controlPoint) {
+                midX = el.controlPoint.x;
+                midY = el.controlPoint.y;
+            }
+
+            const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
+
+            if (isVerticalStart) {
+                points.push({ x: fromPoint.x, y: midY });
+                points.push({ x: toPoint.x, y: midY });
+            } else {
+                points.push({ x: midX, y: fromPoint.y });
+                points.push({ x: midX, y: toPoint.y });
+            }
+        }
+
+        points.push({x: toPoint.x, y: toPoint.y});
+        return points;
+    };
+
+    const drawRoundedPath = (ctx: CanvasRenderingContext2D, points: {x: number, y: number}[], radius: number) => {
+        if (points.length < 2) return;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        
+        for (let i = 1; i < points.length - 1; i++) {
+            const p0 = points[i-1];
+            const p1 = points[i];
+            const p2 = points[i+1];
+            // Limit radius to half the length of the shortest adjacent segment to avoid artifacts
+            // We check both X and Y distances, one will be 0 for orthogonal lines, so we take the max of the diffs
+            const dist1 = Math.max(Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y));
+            const dist2 = Math.max(Math.abs(p2.x - p1.x), Math.abs(p2.y - p1.y));
+            const r = Math.min(radius, dist1/2, dist2/2); 
+            ctx.arcTo(p1.x, p1.y, p2.x, p2.y, r);
+        }
+        
+        ctx.lineTo(points[points.length-1].x, points[points.length-1].y);
+        ctx.stroke();
+    };
+
     useEffect(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -281,7 +471,11 @@ const Board = () => {
         ctx.translate(panOffset.x, panOffset.y);
         ctx.scale(zoom, zoom);
 
-        elements.filter(el => el.type === 'arrow').forEach(el => {
+        elements.forEach(el => {
+            if (el.isHidden) return;
+            const isSelected = selectedElements.includes(el.id);
+
+            if (el.type === 'arrow') {
             const fromEl = elements.find(e => e.id === el.fromId);
             const toEl = elements.find(e => e.id === el.toId);
             
@@ -307,35 +501,35 @@ const Board = () => {
             else if (el.lineStyle === 'dotted') ctx.setLineDash([2, 4]);
             else ctx.setLineDash([]);
 
-            ctx.beginPath();
-            
             let endAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x);
 
             if (el.arrowType === 'elbow') {
-                const midX = (fromPoint.x + toPoint.x) / 2;
-                ctx.moveTo(fromPoint.x, fromPoint.y);
-                ctx.lineTo(midX, fromPoint.y);
-                ctx.lineTo(midX, toPoint.y);
-                ctx.lineTo(toPoint.x, toPoint.y);
-                
-                if (Math.abs(fromPoint.y - toPoint.y) > 0) {
-                     endAngle = toPoint.y > fromPoint.y ? Math.PI / 2 : -Math.PI / 2;
-                } else {
-                     endAngle = toPoint.x > fromPoint.x ? 0 : Math.PI;
+                const points = getArrowPoints(el);
+                drawRoundedPath(ctx, points, 12); // Radius 12
+
+                // Calculate end angle from last segment
+                if (points.length >= 2) {
+                    const pLast = points[points.length - 1];
+                    const pPrev = points[points.length - 2];
+                    endAngle = Math.atan2(pLast.y - pPrev.y, pLast.x - pPrev.x);
                 }
             } else if (el.arrowType === 'curved') {
                 const dx = toPoint.x - fromPoint.x;
                 const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
                 const controlPoint2 = { x: toPoint.x - dx / 2, y: toPoint.y };
+                ctx.beginPath();
                 ctx.moveTo(fromPoint.x, fromPoint.y);
                 ctx.bezierCurveTo(controlPoint1.x, controlPoint1.y, controlPoint2.x, controlPoint2.y, toPoint.x, toPoint.y);
+                ctx.stroke();
                 // Approximate end angle for bezier
                 endAngle = Math.atan2(toPoint.y - controlPoint2.y, toPoint.x - controlPoint2.x);
             } else {
+                ctx.beginPath();
                 ctx.moveTo(fromPoint.x, fromPoint.y);
                 ctx.lineTo(toPoint.x, toPoint.y);
+                ctx.stroke();
             }
-            ctx.stroke();
+            // ctx.stroke(); // Removed because drawRoundedPath strokes, and others stroke manually
             ctx.setLineDash([]);
 
             const headLength = 15;
@@ -344,10 +538,13 @@ const Board = () => {
             if (el.arrowHead === 'start' || el.arrowHead === 'both') {
                 let startAngle;
                 if (el.arrowType === 'elbow') {
-                    if (Math.abs(fromPoint.y - toPoint.y) > 0) {
-                        startAngle = toPoint.y > fromPoint.y ? -Math.PI / 2 : Math.PI / 2;
+                    const points = getArrowPoints(el);
+                    if (points.length >= 2) {
+                        const p0 = points[0];
+                        const p1 = points[1];
+                        startAngle = Math.atan2(p1.y - p0.y, p1.x - p0.x) + Math.PI;
                     } else {
-                        startAngle = toPoint.x > fromPoint.x ? Math.PI : 0;
+                        startAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x) + Math.PI;
                     }
                 } else if (el.arrowType === 'curved') {
                     const dx = toPoint.x - fromPoint.x;
@@ -386,12 +583,7 @@ const Board = () => {
                 );
                 ctx.stroke();
             }
-        });
-
-        elements.filter(el => el.type !== 'arrow').forEach(el => {
-            const isSelected = selectedElements.includes(el.id);
-            
-            if (el.type === 'rect') {
+            } else if (el.type === 'rect') {
                 ctx.globalAlpha = el.opacity || 1;
                 if (el.backgroundColor) {
                     ctx.fillStyle = el.backgroundColor;
@@ -575,6 +767,26 @@ const Board = () => {
             }
         });
 
+        if (selectedElements.length === 1) {
+            const el = elements.find(e => e.id === selectedElements[0]);
+            if (el && el.type === 'arrow') {
+                const handles = getArrowHandles(el);
+                handles.forEach(handle => {
+                    ctx.fillStyle = handle.type === 'control' ? '#f59e0b' : 'white';
+                    ctx.strokeStyle = '#3b82f6';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    if (handle.type === 'control') {
+                        ctx.arc(handle.x, handle.y, 5, 0, 2 * Math.PI);
+                    } else {
+                        ctx.rect(handle.x - 4, handle.y - 4, 8, 8);
+                    }
+                    ctx.fill();
+                    ctx.stroke();
+                });
+            }
+        }
+
         if ((tool === 'arrow' || tool === 'line') && arrowStart && currentPos) {
             ctx.strokeStyle = 'rgba(96, 165, 250, 0.7)';
             ctx.lineWidth = 2;
@@ -649,6 +861,8 @@ const Board = () => {
     const getElementAtPosition = (x: number, y: number): Element | null => {
         for (let i = elements.length - 1; i >= 0; i--) {
             const el = elements[i];
+            if (el.isHidden) continue;
+
             if (el.type === 'rect') {
                 if (x >= el.x && x <= el.x + (el.w || 0) &&
                     y >= el.y && y <= el.y + (el.h || 0)) {
@@ -662,9 +876,10 @@ const Board = () => {
             } else if (el.type === 'text') {
                 const ctx = canvasRef.current?.getContext('2d');
                 if (ctx) {
-                    ctx.font = '16px Arial';
+                    ctx.font = `${el.fontSize || 16}px ${el.fontFamily || 'Arial'}`;
                     const textWidth = ctx.measureText(el.text || '').width;
-                    if (x >= el.x && x <= el.x + textWidth && y >= el.y - 16 && y <= el.y) {
+                    const height = el.fontSize || 16;
+                    if (x >= el.x && x <= el.x + textWidth && y >= el.y - height && y <= el.y + height/2) {
                         return el;
                     }
                 }
@@ -673,7 +888,6 @@ const Board = () => {
                     return el;
                 }
             } else if (el.type === 'arrow') {
-                // Arrow hit detection
                 let fromPoint = el.startPoint;
                 let toPoint = el.endPoint;
 
@@ -694,37 +908,26 @@ const Board = () => {
                 }
 
                 if (fromPoint && toPoint) {
-                    // Simple distance to segment check for straight lines
-                    // For curves/elbows, this is an approximation or needs more complex logic
-                    // Using the same logic as context menu for now
-                    const A = x - fromPoint.x;
-                    const B = y - fromPoint.y;
-                    const C = toPoint.x - fromPoint.x;
-                    const D = toPoint.y - fromPoint.y;
-                    
-                    const dot = A * C + B * D;
-                    const lenSq = C * C + D * D;
-                    let param = -1;
-                    if (lenSq !== 0) param = dot / lenSq;
-                    
-                    let xx, yy;
-                    
-                    if (param < 0) {
-                        xx = fromPoint.x;
-                        yy = fromPoint.y;
-                    } else if (param > 1) {
-                        xx = toPoint.x;
-                        yy = toPoint.y;
+                    if (el.arrowType === 'elbow') {
+                        const points = getArrowPoints(el);
+                        let hit = false;
+                        for (let j = 0; j < points.length - 1; j++) {
+                            if (distanceToSegment({x, y}, points[j], points[j+1]) < 10) {
+                                hit = true;
+                                break;
+                            }
+                        }
+                        if (hit) return el;
+                    } else if (el.arrowType === 'curved') {
+                         const dx = toPoint.x - fromPoint.x;
+                         const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
+                         const controlPoint2 = { x: toPoint.x - dx / 2, y: toPoint.y };
+                         if (distanceToBezier({x, y}, fromPoint, controlPoint1, controlPoint2, toPoint) < 10) {
+                             return el;
+                         }
                     } else {
-                        xx = fromPoint.x + param * C;
-                        yy = fromPoint.y + param * D;
+                        if (distanceToSegment({x, y}, fromPoint, toPoint) < 10) return el;
                     }
-                    
-                    const dx = x - xx;
-                    const dy = y - yy;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    
-                    if (dist < 10) return el;
                 }
             }
         }
@@ -733,7 +936,7 @@ const Board = () => {
 
     const getConnectionPointAtPosition = (x: number, y: number): { element: Element, point: ConnectionPoint } | null => {
         for (const el of elements) {
-            if (el.type === 'arrow') continue;
+            if (el.type === 'arrow' || el.isHidden) continue;
             const points = getConnectionPoints(el);
             for (const point of points) {
                 const dist = Math.sqrt(Math.pow(x - point.x, 2) + Math.pow(y - point.y, 2));
@@ -757,50 +960,12 @@ const Board = () => {
     const handleContextMenu = (e: React.MouseEvent) => {
         e.preventDefault();
         const { x, y } = getCanvasCoords(e);
-        
-        const clickedArrow = elements.find(el => {
-            if (el.type !== 'arrow') return false;
-            const fromEl = elements.find(e => e.id === el.fromId);
-            const toEl = elements.find(e => e.id === el.toId);
-            if (!fromEl || !toEl) return false;
-            
-            const fromPoints = getConnectionPoints(fromEl);
-            const toPoints = getConnectionPoints(toEl);
-            const fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
-            const toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
-            
-            const A = x - fromPoint.x;
-            const B = y - fromPoint.y;
-            const C = toPoint.x - fromPoint.x;
-            const D = toPoint.y - fromPoint.y;
-            
-            const dot = A * C + B * D;
-            const lenSq = C * C + D * D;
-            let param = -1;
-            if (lenSq !== 0) param = dot / lenSq;
-            
-            let xx, yy;
-            
-            if (param < 0) {
-                xx = fromPoint.x;
-                yy = fromPoint.y;
-            } else if (param > 1) {
-                xx = toPoint.x;
-                yy = toPoint.y;
-            } else {
-                xx = fromPoint.x + param * C;
-                yy = fromPoint.y + param * D;
+        const element = getElementAtPosition(x, y);
+        if (element) {
+            setContextMenu({ x: e.clientX, y: e.clientY, elementId: element.id });
+            if (!selectedElements.includes(element.id)) {
+                setSelectedElements([element.id]);
             }
-            
-            const dx = x - xx;
-            const dy = y - yy;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            
-            return dist < 10;
-        });
-
-        if (clickedArrow) {
-            setContextMenu({ x: e.clientX, y: e.clientY, elementId: clickedArrow.id });
         } else {
             setContextMenu(null);
         }
@@ -808,6 +973,36 @@ const Board = () => {
 
     const handleMouseMove = (e: React.MouseEvent) => {
         const { x, y } = getCanvasCoords(e);
+
+        if (isDrawing && arrowHandle && selectedElements.length === 1) {
+            const el = elements.find(e => e.id === selectedElements[0]);
+            if (el && el.type === 'arrow') {
+                const newElements = elements.map(e => {
+                    if (e.id === el.id) {
+                        if (arrowHandle.type === 'control') {
+                            return { ...e, controlPoint: { x, y } };
+                        } else if (arrowHandle.type === 'start') {
+                            const connection = getConnectionPointAtPosition(x, y);
+                            if (connection) {
+                                return { ...e, startPoint: undefined, fromId: connection.element.id, fromPoint: connection.point };
+                            } else {
+                                return { ...e, startPoint: { x, y }, fromId: undefined, fromPoint: undefined };
+                            }
+                        } else if (arrowHandle.type === 'end') {
+                            const connection = getConnectionPointAtPosition(x, y);
+                            if (connection) {
+                                return { ...e, endPoint: undefined, toId: connection.element.id, toPoint: connection.point };
+                            } else {
+                                return { ...e, endPoint: { x, y }, toId: undefined, toPoint: undefined };
+                            }
+                        }
+                    }
+                    return e;
+                });
+                setElements(newElements);
+                return;
+            }
+        }
 
         if (isDrawing && resizeHandle && selectedElements.length === 1) {
             const el = elements.find(e => e.id === selectedElements[0]);
@@ -929,16 +1124,29 @@ const Board = () => {
 
         if (selectedElements.length === 1) {
             const el = elements.find(e => e.id === selectedElements[0]);
-            if (el && (el.type === 'rect' || el.type === 'circle' || el.type === 'image')) {
-                const handles = getResizeHandles(el);
-                const clickedHandle = handles.find(h => {
-                    return x >= h.x - 5 && x <= h.x + 5 && y >= h.y - 5 && y <= h.y + 5;
-                });
-                if (clickedHandle) {
-                    setResizeHandle(clickedHandle.type);
-                    setIsDrawing(true);
-                    setStartPos({ x, y });
-                    return;
+            if (el) {
+                if (el.type === 'rect' || el.type === 'circle' || el.type === 'image') {
+                    const handles = getResizeHandles(el);
+                    const clickedHandle = handles.find(h => {
+                        return x >= h.x - 5 && x <= h.x + 5 && y >= h.y - 5 && y <= h.y + 5;
+                    });
+                    if (clickedHandle) {
+                        setResizeHandle(clickedHandle.type);
+                        setIsDrawing(true);
+                        setStartPos({ x, y });
+                        return;
+                    }
+                } else if (el.type === 'arrow') {
+                    const handles = getArrowHandles(el);
+                    const clickedHandle = handles.find(h => {
+                        return x >= h.x - 5 && x <= h.x + 5 && y >= h.y - 5 && y <= h.y + 5;
+                    });
+                    if (clickedHandle) {
+                        setArrowHandle(clickedHandle);
+                        setIsDrawing(true);
+                        setStartPos({ x, y });
+                        return;
+                    }
                 }
             }
         }
@@ -1041,8 +1249,9 @@ const Board = () => {
     };
 
     const stopDrawing = async () => {
-        if (resizeHandle) {
+        if (resizeHandle || arrowHandle) {
             setResizeHandle(null);
+            setArrowHandle(null);
             setIsDrawing(false);
             addToHistory(elements);
             emitElements(elements);
@@ -1178,15 +1387,32 @@ const Board = () => {
         emitElements(allElements);
     };
 
+    const uploadImage = async (file: File): Promise<string | null> => {
+        const formData = new FormData();
+        formData.append('image', file);
+
+        try {
+            const res = await axios.post('http://localhost:5000/api/upload', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
+            });
+            return res.data.url;
+        } catch (err) {
+            console.error('Error uploading image:', err);
+            return null;
+        }
+    };
+
     const handleImageUpload = () => {
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = 'image/*';
-        input.onchange = (e: any) => {
+        input.onchange = async (e: any) => {
             const file = e.target.files[0];
             if (file) {
-                const reader = new FileReader();
-                reader.onload = (event) => {
+                const imageUrl = await uploadImage(file);
+                if (imageUrl) {
                     const newElement: Element = {
                         id: Date.now().toString(),
                         type: 'image',
@@ -1194,15 +1420,14 @@ const Board = () => {
                         y: 100,
                         w: 200,
                         h: 200,
-                        imageUrl: event.target?.result as string
+                        imageUrl: imageUrl
                     };
                     const newElements = [...elements, newElement];
                     setElements(newElements);
                     addToHistory(newElements);
                     emitElements(newElements);
                     setTool('select');
-                };
-                reader.readAsDataURL(file);
+                }
             }
         };
         input.click();
@@ -1269,6 +1494,84 @@ const Board = () => {
         addToHistory(newElements);
         emitElements(newElements);
         setContextMenu(null);
+    };
+
+    const toggleVisibility = (id: string) => {
+        const newElements = elements.map(el => {
+            if (el.id === id) {
+                return { ...el, isHidden: !el.isHidden };
+            }
+            return el;
+        });
+        setElements(newElements);
+        addToHistory(newElements);
+        emitElements(newElements);
+    };
+
+    const getIconForType = (type: string) => {
+        switch (type) {
+            case 'rect': return <Square size={14} />;
+            case 'circle': return <Circle size={14} />;
+            case 'text': return <Type size={14} />;
+            case 'image': return <Search size={14} />;
+            case 'arrow': return <ArrowRight size={14} />;
+            default: return <Square size={14} />;
+        }
+    };
+
+    const handleCanvasDrop = async (e: React.DragEvent) => {
+        e.preventDefault();
+        const file = e.dataTransfer.files[0];
+        if (file && file.type.startsWith('image/')) {
+            const { x, y } = getCanvasCoords(e as unknown as React.MouseEvent);
+            const imageUrl = await uploadImage(file);
+            
+            if (imageUrl) {
+                const newElement: Element = {
+                    id: Date.now().toString(),
+                    type: 'image',
+                    x: x - 100,
+                    y: y - 100,
+                    w: 200,
+                    h: 200,
+                    imageUrl: imageUrl
+                };
+                const newElements = [...elements, newElement];
+                setElements(newElements);
+                addToHistory(newElements);
+                emitElements(newElements);
+            }
+        }
+    };
+
+    const handleWheel = (e: React.WheelEvent) => {
+        if (e.ctrlKey) return;
+        setPanOffset(prev => ({
+            ...prev,
+            y: prev.y - e.deltaY
+        }));
+    };
+
+    const handleLayerDragStart = (e: React.DragEvent, index: number) => {
+        setDraggedLayerIndex(index);
+    };
+
+    const handleLayerDrop = (e: React.DragEvent, targetIndex: number) => {
+        e.preventDefault();
+        if (draggedLayerIndex === null) return;
+        if (draggedLayerIndex === targetIndex) return;
+
+        const realSourceIndex = elements.length - 1 - draggedLayerIndex;
+        const realTargetIndex = elements.length - 1 - targetIndex;
+        
+        const newElements = [...elements];
+        const [movedElement] = newElements.splice(realSourceIndex, 1);
+        newElements.splice(realTargetIndex, 0, movedElement);
+        
+        setElements(newElements);
+        addToHistory(newElements);
+        emitElements(newElements);
+        setDraggedLayerIndex(null);
     };
 
     const handlersRef = useRef({
@@ -1344,14 +1647,6 @@ const Board = () => {
                 case 'f':
                     setTool('frame');
                     break;
-                case 'c':
-                    if (e.ctrlKey || e.metaKey) {
-                        e.preventDefault();
-                        copySelected();
-                    } else {
-                        setTool('comment');
-                    }
-                    break;
                 case 'i':
                     handleImageUpload();
                     break;
@@ -1403,10 +1698,6 @@ const Board = () => {
                     <button className="p-2 rounded hover:bg-secondary text-muted-foreground hover:text-foreground relative group">
                         <Plus size={20} />
                         <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Insert (I)</span>
-                    </button>
-                    <button className="p-2 rounded hover:bg-secondary text-muted-foreground hover:text-foreground relative group">
-                        <Sparkles size={20} />
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">AI (Ctrl+J)</span>
                     </button>
                 </div>
 
@@ -1484,26 +1775,6 @@ const Board = () => {
                         <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Image</span>
                     </button>
                 </div>
-
-                {/* Bottom Group */}
-                <div className="bg-card border border-border rounded-lg p-1 flex flex-col gap-1 shadow-lg">
-                    <button 
-                        onClick={() => setTool('frame')}
-                        className={`p-2 rounded relative group ${tool === 'frame' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <Frame size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">F</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Frame</span>
-                    </button>
-                    <button 
-                        onClick={() => setTool('comment')}
-                        className={`p-2 rounded relative group ${tool === 'comment' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
-                    >
-                        <MessageSquare size={20} />
-                        <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">C</span>
-                        <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Comment</span>
-                    </button>
-                </div>
             </div>
 
             <div className="flex-1 relative">
@@ -1515,7 +1786,48 @@ const Board = () => {
                     >
                         <Hand size={20} />
                     </button>
+                    <button
+                        onClick={() => setShowLayers(!showLayers)}
+                        className={`p-2 rounded border border-border shadow-sm ${showLayers ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-secondary text-muted-foreground'}`}
+                        title="Layers"
+                    >
+                        <Layers size={20} />
+                    </button>
                 </div>
+
+                {showLayers && (
+                    <div className="absolute top-16 right-4 w-64 bg-card border border-border rounded-lg shadow-lg flex flex-col max-h-[calc(100vh-100px)] z-20">
+                        <div className="p-2 border-b border-border font-bold text-sm flex justify-between items-center">
+                            <span>Layers</span>
+                            <span className="text-xs text-muted-foreground">{elements.length} elements</span>
+                        </div>
+                        <div className="overflow-y-auto flex-1 p-2 flex flex-col gap-1">
+                            {elements.slice().reverse().map((el, i) => (
+                                <div 
+                                    key={el.id}
+                                    draggable
+                                    onDragStart={(e) => handleLayerDragStart(e, i)}
+                                    onDragOver={(e) => e.preventDefault()}
+                                    onDrop={(e) => handleLayerDrop(e, i)}
+                                    className={`p-2 rounded text-xs flex items-center gap-2 cursor-pointer group ${selectedElements.includes(el.id) ? 'bg-primary/20 text-primary' : 'hover:bg-secondary'}`}
+                                    onClick={() => setSelectedElements([el.id])}
+                                >
+                                    {getIconForType(el.type)}
+                                    <span className="truncate flex-1">{el.text || el.type + ' ' + (elements.length - 1 - i)}</span>
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); toggleVisibility(el.id); }}
+                                        className="opacity-0 group-hover:opacity-100 hover:text-foreground text-muted-foreground"
+                                    >
+                                        {el.isHidden ? <EyeOff size={14} /> : <Eye size={14} />}
+                                    </button>
+                                </div>
+                            ))}
+                            {elements.length === 0 && (
+                                <div className="text-center text-muted-foreground text-xs py-4">No elements</div>
+                            )}
+                        </div>
+                    </div>
+                )}
 
                 <canvas
                     ref={canvasRef}
@@ -1533,6 +1845,9 @@ const Board = () => {
                     onMouseLeave={stopDrawing}
                     onDoubleClick={handleDoubleClick}
                     onContextMenu={handleContextMenu}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={handleCanvasDrop}
+                    onWheel={handleWheel}
                 />
 
                 {editingElementId && (() => {
@@ -1591,50 +1906,116 @@ const Board = () => {
 
                 {contextMenu && (
                     <div 
-                        className="absolute bg-card border border-border rounded shadow-lg p-2 z-50 flex flex-col gap-2"
+                        className="absolute bg-card border border-border rounded shadow-lg p-1 z-50 flex flex-col min-w-[200px]"
                         style={{ left: contextMenu.x, top: contextMenu.y }}
                     >
-                        <div className="text-xs font-bold mb-1">Arrow Style</div>
-                        <div className="flex gap-1">
-                            <button 
-                                onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'straight' })}
-                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
-                            >Straight</button>
-                            <button 
-                                onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'elbow' })}
-                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
-                            >Elbow</button>
-                            <button 
-                                onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'curved' })}
-                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
-                            >Curved</button>
+                        <button onClick={cutSelected} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                            <Scissors size={14} /> <span>Cut</span> <span className="ml-auto text-muted-foreground">Ctrl X</span>
+                        </button>
+                        <button onClick={copySelected} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                            <Copy size={14} /> <span>Copy</span> <span className="ml-auto text-muted-foreground">Ctrl C</span>
+                        </button>
+                        <button onClick={paste} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                            <Clipboard size={14} /> <span>Paste</span> <span className="ml-auto text-muted-foreground">Ctrl V</span>
+                        </button>
+                        <button onClick={() => { copySelected(); paste(); }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                            <Copy size={14} /> <span>Duplicate</span> <span className="ml-auto text-muted-foreground">Ctrl D</span>
+                        </button>
+                        <button onClick={() => setSelectedElements(elements.map(e => e.id))} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                            <MousePointer size={14} /> <span>Select all</span> <span className="ml-auto text-muted-foreground">Ctrl A</span>
+                        </button>
+                        
+                        <div className="h-px bg-border my-1" />
+                        
+                        <button className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left opacity-50 cursor-not-allowed">
+                            <Download size={14} /> <span>Export selection</span>
+                        </button>
+                        
+                        <div className="h-px bg-border my-1" />
+                        
+                        <div className="relative group/order">
+                            <button className="w-full flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                <BringToFront size={14} /> <span>Change Order</span> <ArrowRight size={12} className="ml-auto" />
+                            </button>
+                            <div className="absolute left-full top-0 ml-1 bg-card border border-border rounded shadow-lg p-1 flex-col min-w-[150px] hidden group-hover/order:flex">
+                                <button onClick={() => {
+                                    // Bring forward
+                                    const idx = elements.findIndex(e => e.id === contextMenu.elementId);
+                                    if (idx < elements.length - 1) {
+                                        const newEls = [...elements];
+                                        [newEls[idx], newEls[idx+1]] = [newEls[idx+1], newEls[idx]];
+                                        setElements(newEls);
+                                        emitElements(newEls);
+                                    }
+                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                    <span>Bring forward</span> <span className="ml-auto text-muted-foreground">Ctrl ]</span>
+                                </button>
+                                <button onClick={() => {
+                                    // Send backward
+                                    const idx = elements.findIndex(e => e.id === contextMenu.elementId);
+                                    if (idx > 0) {
+                                        const newEls = [...elements];
+                                        [newEls[idx], newEls[idx-1]] = [newEls[idx-1], newEls[idx]];
+                                        setElements(newEls);
+                                        emitElements(newEls);
+                                    }
+                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                    <span>Send backward</span> <span className="ml-auto text-muted-foreground">Ctrl [</span>
+                                </button>
+                                <button onClick={() => {
+                                    // Bring to front
+                                    const newEls = elements.filter(e => e.id !== contextMenu.elementId);
+                                    const el = elements.find(e => e.id === contextMenu.elementId);
+                                    if (el) {
+                                        newEls.push(el);
+                                        setElements(newEls);
+                                        emitElements(newEls);
+                                    }
+                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                    <span>Bring to front</span> <span className="ml-auto text-muted-foreground">]</span>
+                                </button>
+                                <button onClick={() => {
+                                    // Send to back
+                                    const newEls = elements.filter(e => e.id !== contextMenu.elementId);
+                                    const el = elements.find(e => e.id === contextMenu.elementId);
+                                    if (el) {
+                                        newEls.unshift(el);
+                                        setElements(newEls);
+                                        emitElements(newEls);
+                                    }
+                                }} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
+                                    <span>Send to back</span> <span className="ml-auto text-muted-foreground">[</span>
+                                </button>
+                            </div>
                         </div>
-                        <div className="w-full h-px bg-border" />
-                        <div className="flex gap-1">
-                            <button 
-                                onClick={() => updateArrowStyle(contextMenu.elementId, { lineStyle: 'solid' })}
-                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
-                            >Solid</button>
-                            <button 
-                                onClick={() => updateArrowStyle(contextMenu.elementId, { lineStyle: 'dashed' })}
-                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
-                            >Dashed</button>
-                            <button 
-                                onClick={() => updateArrowStyle(contextMenu.elementId, { lineStyle: 'dotted' })}
-                                className="p-1 hover:bg-secondary rounded text-xs border border-border"
-                            >Dotted</button>
-                        </div>
-                         <div className="w-full h-px bg-border" />
-                         <button 
-                            onClick={() => {
-                                const newElements = elements.filter(e => e.id !== contextMenu.elementId);
-                                setElements(newElements);
-                                addToHistory(newElements);
-                                emitElements(newElements);
-                                setContextMenu(null);
-                            }}
-                            className="text-red-500 hover:bg-secondary p-1 rounded text-xs text-left"
-                        >Delete Arrow</button>
+
+                        <div className="h-px bg-border my-1" />
+
+                        <button onClick={deleteSelected} className="flex items-center gap-2 p-2 hover:bg-red-500/10 text-red-500 rounded text-xs text-left">
+                            <Trash2 size={14} /> <span>Delete</span> <span className="ml-auto">Del</span>
+                        </button>
+
+                        {/* Arrow specific options if arrow is selected */}
+                        {elements.find(e => e.id === contextMenu.elementId)?.type === 'arrow' && (
+                            <>
+                                <div className="h-px bg-border my-1" />
+                                <div className="text-[10px] font-bold px-2 py-1 text-muted-foreground">ARROW STYLE</div>
+                                <div className="flex gap-1 px-2">
+                                    <button 
+                                        onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'straight' })}
+                                        className="p-1 hover:bg-secondary rounded text-xs border border-border flex-1 text-center"
+                                    >Straight</button>
+                                    <button 
+                                        onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'elbow' })}
+                                        className="p-1 hover:bg-secondary rounded text-xs border border-border flex-1 text-center"
+                                    >Elbow</button>
+                                    <button 
+                                        onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'curved' })}
+                                        className="p-1 hover:bg-secondary rounded text-xs border border-border flex-1 text-center"
+                                    >Curved</button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 )}
 
@@ -1673,7 +2054,7 @@ const Board = () => {
                                         style={{ backgroundColor: elements.find(el => el.id === selectedElements[0])?.backgroundColor || 'transparent' }}
                                     />
                                 </button>
-                                <div className="absolute bottom-full left-0 mb-0 hidden group-hover:block bg-card p-2 rounded border border-border shadow-lg flex flex-col gap-2">
+                                <div className="absolute bottom-full left-0 mb-0  group-hover:block bg-card p-2 rounded border border-border shadow-lg flex flex-col gap-2">
                                     <div className="flex items-center gap-2">
                                         <span className="text-xs">Fill:</span>
                                         <input

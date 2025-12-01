@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const dotenv = require('dotenv');
 const http = require('http');
+const path = require('path');
 const { Server } = require('socket.io');
 
 dotenv.config();
@@ -23,12 +24,15 @@ const io = new Server(server, {
 
 app.use(cors());
 app.use(express.json());
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 const authRoute = require('./routes/auth');
 const boardRoute = require('./routes/boards');
+const uploadRoute = require('./routes/upload');
 
 app.use('/api/auth', authRoute);
 app.use('/api/boards', boardRoute);
+app.use('/api/upload', uploadRoute);
 
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/uniboard')
     .then(() => console.log('MongoDB connected'))
