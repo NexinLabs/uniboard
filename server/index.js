@@ -50,7 +50,7 @@ io.on('connection', (socket) => {
     // Join a specific board room
     socket.on('join-board', (boardId) => {
         socket.join(boardId);
-        console.log(`User ${socket.id} joined board ${boardId}`);
+        // console.log(`User ${socket.id} joined board ${boardId}`);
 
         // Notify others in the room
         socket.to(boardId).emit('user-joined', {
@@ -68,7 +68,7 @@ io.on('connection', (socket) => {
         try {
             const Board = require('./models/Board');
             await Board.findByIdAndUpdate(boardId, { elements });
-            console.log(`💾 Saved board ${boardId} to database`);
+            // console.log(`💾 Saved board ${boardId} to database`);
         } catch (err) {
             console.error('Error saving board:', err);
         }
@@ -89,7 +89,7 @@ io.on('connection', (socket) => {
 
     // Handle disconnection
     socket.on('disconnect', () => {
-        console.log('User disconnected:', socket.id);
+        // console.log('User disconnected:', socket.id);
     });
 
     // Leave board room

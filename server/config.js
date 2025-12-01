@@ -1,3 +1,7 @@
+const dotenv = require('dotenv');
+dotenv.config();
+
+
 const config = {
     PORT : process.env.PORT || 5000,
     CLIENT_ORIGIN : process.env.CLIENT_ORIGIN || "http://localhost:5173",
@@ -13,4 +17,4 @@ if (!config.JWT.SECRET) {
     throw new Error("JWT_SECRET is not defined");
 }
 
-export default config;
+module.exports = config;
