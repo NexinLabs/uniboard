@@ -89,9 +89,10 @@ io.on('connection', (socket) => {
             const board = await Board.findById(boardId);
             if (!board) return;
 
+            
             const userId = socket.user ? socket.user.id : null;
             const isOwner = userId && board.user.toString() === userId;
-            const isEditor = userId && board.collaborators.some(c => c.user.toString() === userId && c.role === 'editor');
+            const isEditor = userId && board.editors.some(id => id.toString() === userId);
             const isPublicEdit = board.visibility === 'public-edit';
 
             if (isOwner || isEditor || isPublicEdit) {
@@ -102,7 +103,7 @@ io.on('connection', (socket) => {
                 await Board.findByIdAndUpdate(boardId, { elements });
                 // console.log(`💾 Saved board ${boardId} to database`);
             } else {
-                
+
                 //console.warn(`⚠️ Unauthorized update attempt on board ${boardId} by user ${userId || 'Guest'}`);
                 // Optionally emit an error back to the sender
                 socket.emit('error', { message: 'Unauthorized to edit this board' });

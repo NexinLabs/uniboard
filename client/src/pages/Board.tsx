@@ -91,6 +91,7 @@ const Board = () => {
     const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
     const [isPanning, setIsPanning] = useState(false);
     const zoom = 1;
+    const imageCache = useRef<Map<string, HTMLImageElement>>(new Map());
 
     // Board Metadata State
     const [boardTitle, setBoardTitle] = useState('Untitled Board');
@@ -363,9 +364,28 @@ const Board = () => {
                 }
             } else if (el.type === 'image' && el.imageUrl) {
                 ctx.globalAlpha = el.opacity || 1;
-                const img = new window.Image();
-                img.src = el.imageUrl;
-                if (img.complete) {
+
+                // Use cached image or create new one
+                let img = imageCache.current.get(el.imageUrl);
+                if (!img) {
+                    img = new window.Image();
+                    img.src = el.imageUrl;
+                    imageCache.current.set(el.imageUrl, img);
+
+                    // Set up load handler only once
+                    img.onload = () => {
+                        // Force a redraw by requesting animation frame
+                        requestAnimationFrame(() => {
+                            // The useEffect dependency on elements will handle the redraw
+                        });
+                    };
+                    img.onerror = () => {
+                        console.error('Failed to load image:', el.imageUrl);
+                    };
+                }
+
+                // Draw if loaded
+                if (img.complete && img.naturalWidth > 0) {
                     ctx.drawImage(img, el.x, el.y, el.w || 200, el.h || 200);
                     if (isSelected) {
                         ctx.strokeStyle = '#60a5fa';
@@ -923,7 +943,9 @@ const Board = () => {
         input.onchange = async (e: any) => {
             const file = e.target.files[0];
             if (file) {
+                console.log('Uploading image:', file.name);
                 const imageUrl = await uploadImage(file);
+                console.log('Image uploaded, URL:', imageUrl);
                 if (imageUrl) {
                     const newElement: Element = {
                         id: Date.now().toString(),
@@ -934,11 +956,16 @@ const Board = () => {
                         h: 200,
                         imageUrl: imageUrl
                     };
+                    console.log('Creating image element:', newElement);
                     const newElements = [...elements, newElement];
                     setElements(newElements);
                     addToHistory(newElements);
                     emitElements(newElements);
                     setTool('select');
+                    console.log('Image element added to board');
+                } else {
+                    console.error('Image upload returned null URL');
+                    alert('Failed to upload image. Please try again.');
                 }
             }
         };
@@ -1054,7 +1081,7 @@ const Board = () => {
     const updateBoard = async (updates: any) => {
         if (isReadOnly()) return;
         try {
-            const res = await api.put(`/api/boards/${id}`, updates);
+            const res = await api.put(`/ api / boards / ${id} `, updates);
             if (res.data.title) setBoardTitle(res.data.title);
             if (res.data.visibility) setVisibility(res.data.visibility);
             if (res.data.editors || res.data.viewers) {
@@ -1074,7 +1101,7 @@ const Board = () => {
         // or we could add a temporary placeholder if we wanted.
 
         try {
-            const res = await api.post(`/api/boards/${id}/collaborators`, { email: inviteEmail, role: inviteRole });
+            const res = await api.post(`/ api / boards / ${id}/collaborators`, { email: inviteEmail, role: inviteRole });
 
             // Sync with server response
             const editors = (res.data.editors || []).map((u: any) => ({ user: u, role: 'editor' }));
