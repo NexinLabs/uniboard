@@ -1191,7 +1191,10 @@ const Board = () => {
         if (!user || !ownerId) return true; // Loading or not logged in
         if (user._id === ownerId) return false; // Owner
         if (visibility === 'public-edit') return false; // Public Edit
-        const collaborator = collaborators.find(c => c.user._id === user._id);
+        const collaborator = collaborators.find(c => {
+            const cUserId = c.user?._id || c.user;
+            return cUserId === user._id;
+        });
         if (collaborator && collaborator.role === 'editor') return false; // Editor
         return true; // Everyone else (viewer, public-view, private)
     };
@@ -1673,10 +1676,10 @@ const Board = () => {
     const updateBoard = async (updates: any) => {
         if (isReadOnly()) return;
         try {
-            await api.put(`/api/boards/${id}`, updates);
-            if (updates.title) setBoardTitle(updates.title);
-            if (updates.visibility) setVisibility(updates.visibility);
-            if (updates.collaborators) setCollaborators(updates.collaborators);
+            const res = await api.put(`/api/boards/${id}`, updates);
+            if (res.data.title) setBoardTitle(res.data.title);
+            if (res.data.visibility) setVisibility(res.data.visibility);
+            if (res.data.collaborators) setCollaborators(res.data.collaborators);
         } catch (err) {
             console.error("Failed to update board", err);
         }
@@ -1694,7 +1697,10 @@ const Board = () => {
                     alert("User is already a collaborator");
                     return;
                 }
-                const newCollaborators = [...collaborators, { user: userToAdd._id, role: inviteRole }];
+                const newCollaborators = [
+                    ...collaborators.map(c => ({ user: c.user?._id || c.user, role: c.role })),
+                    { user: userToAdd._id, role: inviteRole }
+                ];
 
                 // Optimistic update
                 const newCollabsState = [...collaborators, { user: userToAdd, role: inviteRole }];
@@ -1856,9 +1862,11 @@ const Board = () => {
                 <div className="flex items-center gap-2">
                     <div className="flex -space-x-2 mr-4">
                         {collaborators.map((c, i) => (
-                            <div key={i} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs border-2 border-background" title={c.user.username}>
-                                {c.user.username[0].toUpperCase()}
-                            </div>
+                            c.user && (
+                                <div key={i} className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs border-2 border-background" title={c.user.username || 'Unknown'}>
+                                    {c.user.username?.[0]?.toUpperCase() || '?'}
+                                </div>
+                            )
                         ))}
                         {user && !collaborators.some(c => c.user._id === user._id) && (
                             <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground text-xs border-2 border-background" title={user.username + " (You)"}>
