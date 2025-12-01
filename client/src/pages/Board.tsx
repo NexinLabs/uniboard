@@ -4,7 +4,7 @@ import { AuthContext } from '../context/AuthContext';
 import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
 import {
-    Square, Circle, Type,  Trash2, MousePointer,
+    Square, Circle, Type, Trash2, MousePointer,
     ArrowRight, Hand,
     Minus, CornerDownRight, Activity, ArrowLeft, ArrowLeftRight,
     Plus, Sparkles, Frame, Search, AlignLeft, AlignCenter, AlignRight,
@@ -55,7 +55,7 @@ interface Element {
     isLocked?: boolean;
 }
 
-const distanceToSegment = (p: {x: number, y: number}, a: {x: number, y: number}, b: {x: number, y: number}) => {
+const distanceToSegment = (p: { x: number, y: number }, a: { x: number, y: number }, b: { x: number, y: number }) => {
     const A = p.x - a.x;
     const B = p.y - a.y;
     const C = b.x - a.x;
@@ -84,11 +84,11 @@ const distanceToSegment = (p: {x: number, y: number}, a: {x: number, y: number},
     return Math.sqrt(dx * dx + dy * dy);
 };
 
-const distanceToBezier = (p: {x: number, y: number}, p0: {x: number, y: number}, p1: {x: number, y: number}, p2: {x: number, y: number}, p3: {x: number, y: number}) => {
+const distanceToBezier = (p: { x: number, y: number }, p0: { x: number, y: number }, p1: { x: number, y: number }, p2: { x: number, y: number }, p3: { x: number, y: number }) => {
     let minDst = Infinity;
     for (let t = 0; t <= 1; t += 0.05) {
-        const x = Math.pow(1-t, 3)*p0.x + 3*Math.pow(1-t, 2)*t*p1.x + 3*(1-t)*t*t*p2.x + t*t*t*p3.x;
-        const y = Math.pow(1-t, 3)*p0.y + 3*Math.pow(1-t, 2)*t*p1.y + 3*(1-t)*t*t*p2.y + t*t*t*p3.y;
+        const x = Math.pow(1 - t, 3) * p0.x + 3 * Math.pow(1 - t, 2) * t * p1.x + 3 * (1 - t) * t * t * p2.x + t * t * t * p3.x;
+        const y = Math.pow(1 - t, 3) * p0.y + 3 * Math.pow(1 - t, 2) * t * p1.y + 3 * (1 - t) * t * t * p2.y + t * t * t * p3.y;
         const d = Math.sqrt(Math.pow(p.x - x, 2) + Math.pow(p.y - y, 2));
         if (d < minDst) minDst = d;
     }
@@ -140,7 +140,7 @@ const Board = () => {
     const [arrowStart, setArrowStart] = useState<{ x: number, y: number, elementId?: string, point?: ConnectionPoint } | null>(null);
     const [hoveredConnectionPoint, setHoveredConnectionPoint] = useState<{ elementId: string, point: ConnectionPoint } | null>(null);
     const [selectionBox, setSelectionBox] = useState<{ start: { x: number, y: number }, current: { x: number, y: number } } | null>(null);
-    
+
     // New state for advanced features
     const [editingElementId, setEditingElementId] = useState<string | null>(null);
     const [resizeHandle, setResizeHandle] = useState<ResizeHandle | null>(null);
@@ -156,7 +156,7 @@ const Board = () => {
     const getArrowHandles = (el: Element): { type: 'start' | 'end' | 'control', x: number, y: number }[] => {
         if (el.type !== 'arrow') return [];
         const handles: { type: 'start' | 'end' | 'control', x: number, y: number }[] = [];
-        
+
         let fromPoint = el.startPoint;
         let toPoint = el.endPoint;
 
@@ -167,7 +167,7 @@ const Board = () => {
                 fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
             }
         }
-        
+
         if (el.toId && el.toPoint) {
             const toEl = elements.find(e => e.id === el.toId);
             if (toEl) {
@@ -187,17 +187,17 @@ const Board = () => {
             if (points.length >= 3) {
                 // If 4 points: S -> P1 -> P2 -> E. Middle is P1-P2.
                 // If 3 points (aligned): S -> P1 -> E. Middle is P1-E? No, usually 4 points for elbow unless aligned.
-                
+
                 // Let's stick to the previous logic for handle placement as it was robust enough
                 // But we can use the points to be sure.
-                
+
                 // Actually, the previous logic was:
                 // if vertical start: handle at (midX, midY) where midX is variable, midY is fixed?
                 // No, if vertical start: S -> (S.x, midY) -> (E.x, midY) -> E.
                 // The middle segment is horizontal: y = midY.
                 // We want to drag it vertically? No, we drag the horizontal segment up/down.
                 // So handle should be at ((S.x + E.x)/2, midY).
-                
+
                 let midX = (fromPoint.x + toPoint.x) / 2;
                 let midY = (fromPoint.y + toPoint.y) / 2;
 
@@ -207,7 +207,7 @@ const Board = () => {
                 }
 
                 const isVerticalStart = el.fromPoint?.position === 'top' || el.fromPoint?.position === 'bottom';
-                
+
                 if (isVerticalStart) {
                     // Middle segment is horizontal at y=midY. We drag it up/down.
                     // Handle should be at center of that segment.
@@ -240,17 +240,17 @@ const Board = () => {
                 { type: 'w', x, y: y + h / 2 },
             ];
         } else if (el.type === 'circle') {
-             const r = el.radius || 0;
-             const x = el.x - r;
-             const y = el.y - r;
-             const w = r * 2;
-             const h = r * 2;
-             return [
+            const r = el.radius || 0;
+            const x = el.x - r;
+            const y = el.y - r;
+            const w = r * 2;
+            const h = r * 2;
+            return [
                 { type: 'nw', x, y },
                 { type: 'ne', x: x + w, y },
                 { type: 'se', x: x + w, y: y + h },
                 { type: 'sw', x, y: y + h },
-             ];
+            ];
         }
         return [];
     };
@@ -391,7 +391,7 @@ const Board = () => {
         return [];
     };
 
-    const getArrowPoints = (el: Element): {x: number, y: number}[] => {
+    const getArrowPoints = (el: Element): { x: number, y: number }[] => {
         let fromPoint = el.startPoint;
         let toPoint = el.endPoint;
 
@@ -402,7 +402,7 @@ const Board = () => {
                 fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
             }
         }
-        
+
         if (el.toId && el.toPoint) {
             const toEl = elements.find(e => e.id === el.toId);
             if (toEl) {
@@ -413,7 +413,7 @@ const Board = () => {
 
         if (!fromPoint || !toPoint) return [];
 
-        const points: {x: number, y: number}[] = [{x: fromPoint.x, y: fromPoint.y}];
+        const points: { x: number, y: number }[] = [{ x: fromPoint.x, y: fromPoint.y }];
 
         if (el.arrowType === 'elbow') {
             let midX = (fromPoint.x + toPoint.x) / 2;
@@ -435,28 +435,28 @@ const Board = () => {
             }
         }
 
-        points.push({x: toPoint.x, y: toPoint.y});
+        points.push({ x: toPoint.x, y: toPoint.y });
         return points;
     };
 
-    const drawRoundedPath = (ctx: CanvasRenderingContext2D, points: {x: number, y: number}[], radius: number) => {
+    const drawRoundedPath = (ctx: CanvasRenderingContext2D, points: { x: number, y: number }[], radius: number) => {
         if (points.length < 2) return;
         ctx.beginPath();
         ctx.moveTo(points[0].x, points[0].y);
-        
+
         for (let i = 1; i < points.length - 1; i++) {
-            const p0 = points[i-1];
+            const p0 = points[i - 1];
             const p1 = points[i];
-            const p2 = points[i+1];
+            const p2 = points[i + 1];
             // Limit radius to half the length of the shortest adjacent segment to avoid artifacts
             // We check both X and Y distances, one will be 0 for orthogonal lines, so we take the max of the diffs
             const dist1 = Math.max(Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y));
             const dist2 = Math.max(Math.abs(p2.x - p1.x), Math.abs(p2.y - p1.y));
-            const r = Math.min(radius, dist1/2, dist2/2); 
+            const r = Math.min(radius, dist1 / 2, dist2 / 2);
             ctx.arcTo(p1.x, p1.y, p2.x, p2.y, r);
         }
-        
-        ctx.lineTo(points[points.length-1].x, points[points.length-1].y);
+
+        ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
         ctx.stroke();
     };
 
@@ -476,113 +476,113 @@ const Board = () => {
             const isSelected = selectedElements.includes(el.id);
 
             if (el.type === 'arrow') {
-            const fromEl = elements.find(e => e.id === el.fromId);
-            const toEl = elements.find(e => e.id === el.toId);
-            
-            let fromPoint = el.startPoint;
-            let toPoint = el.endPoint;
+                const fromEl = elements.find(e => e.id === el.fromId);
+                const toEl = elements.find(e => e.id === el.toId);
 
-            if (fromEl && el.fromPoint) {
-                const fromPoints = getConnectionPoints(fromEl);
-                fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
-            }
-            
-            if (toEl && el.toPoint) {
-                const toPoints = getConnectionPoints(toEl);
-                toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
-            }
+                let fromPoint = el.startPoint;
+                let toPoint = el.endPoint;
 
-            if (!fromPoint || !toPoint) return;
-
-            ctx.strokeStyle = el.color || 'white';
-            ctx.lineWidth = (el.lineWidth || 2) + (selectedElements.includes(el.id) ? 1 : 0);
-            
-            if (el.lineStyle === 'dashed') ctx.setLineDash([10, 5]);
-            else if (el.lineStyle === 'dotted') ctx.setLineDash([2, 4]);
-            else ctx.setLineDash([]);
-
-            let endAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x);
-
-            if (el.arrowType === 'elbow') {
-                const points = getArrowPoints(el);
-                drawRoundedPath(ctx, points, 12); // Radius 12
-
-                // Calculate end angle from last segment
-                if (points.length >= 2) {
-                    const pLast = points[points.length - 1];
-                    const pPrev = points[points.length - 2];
-                    endAngle = Math.atan2(pLast.y - pPrev.y, pLast.x - pPrev.x);
+                if (fromEl && el.fromPoint) {
+                    const fromPoints = getConnectionPoints(fromEl);
+                    fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
                 }
-            } else if (el.arrowType === 'curved') {
-                const dx = toPoint.x - fromPoint.x;
-                const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
-                const controlPoint2 = { x: toPoint.x - dx / 2, y: toPoint.y };
-                ctx.beginPath();
-                ctx.moveTo(fromPoint.x, fromPoint.y);
-                ctx.bezierCurveTo(controlPoint1.x, controlPoint1.y, controlPoint2.x, controlPoint2.y, toPoint.x, toPoint.y);
-                ctx.stroke();
-                // Approximate end angle for bezier
-                endAngle = Math.atan2(toPoint.y - controlPoint2.y, toPoint.x - controlPoint2.x);
-            } else {
-                ctx.beginPath();
-                ctx.moveTo(fromPoint.x, fromPoint.y);
-                ctx.lineTo(toPoint.x, toPoint.y);
-                ctx.stroke();
-            }
-            // ctx.stroke(); // Removed because drawRoundedPath strokes, and others stroke manually
-            ctx.setLineDash([]);
 
-            const headLength = 15;
-            
-            // Draw start arrow head
-            if (el.arrowHead === 'start' || el.arrowHead === 'both') {
-                let startAngle;
+                if (toEl && el.toPoint) {
+                    const toPoints = getConnectionPoints(toEl);
+                    toPoint = toPoints.find(p => p.position === el.toPoint?.position) || toPoints[0];
+                }
+
+                if (!fromPoint || !toPoint) return;
+
+                ctx.strokeStyle = el.color || 'white';
+                ctx.lineWidth = (el.lineWidth || 2) + (selectedElements.includes(el.id) ? 1 : 0);
+
+                if (el.lineStyle === 'dashed') ctx.setLineDash([10, 5]);
+                else if (el.lineStyle === 'dotted') ctx.setLineDash([2, 4]);
+                else ctx.setLineDash([]);
+
+                let endAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x);
+
                 if (el.arrowType === 'elbow') {
                     const points = getArrowPoints(el);
+                    drawRoundedPath(ctx, points, 12); // Radius 12
+
+                    // Calculate end angle from last segment
                     if (points.length >= 2) {
-                        const p0 = points[0];
-                        const p1 = points[1];
-                        startAngle = Math.atan2(p1.y - p0.y, p1.x - p0.x) + Math.PI;
-                    } else {
-                        startAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x) + Math.PI;
+                        const pLast = points[points.length - 1];
+                        const pPrev = points[points.length - 2];
+                        endAngle = Math.atan2(pLast.y - pPrev.y, pLast.x - pPrev.x);
                     }
                 } else if (el.arrowType === 'curved') {
                     const dx = toPoint.x - fromPoint.x;
                     const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
-                    startAngle = Math.atan2(controlPoint1.y - fromPoint.y, controlPoint1.x - fromPoint.x) + Math.PI;
+                    const controlPoint2 = { x: toPoint.x - dx / 2, y: toPoint.y };
+                    ctx.beginPath();
+                    ctx.moveTo(fromPoint.x, fromPoint.y);
+                    ctx.bezierCurveTo(controlPoint1.x, controlPoint1.y, controlPoint2.x, controlPoint2.y, toPoint.x, toPoint.y);
+                    ctx.stroke();
+                    // Approximate end angle for bezier
+                    endAngle = Math.atan2(toPoint.y - controlPoint2.y, toPoint.x - controlPoint2.x);
                 } else {
-                    startAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x) + Math.PI;
+                    ctx.beginPath();
+                    ctx.moveTo(fromPoint.x, fromPoint.y);
+                    ctx.lineTo(toPoint.x, toPoint.y);
+                    ctx.stroke();
+                }
+                // ctx.stroke(); // Removed because drawRoundedPath strokes, and others stroke manually
+                ctx.setLineDash([]);
+
+                const headLength = 15;
+
+                // Draw start arrow head
+                if (el.arrowHead === 'start' || el.arrowHead === 'both') {
+                    let startAngle;
+                    if (el.arrowType === 'elbow') {
+                        const points = getArrowPoints(el);
+                        if (points.length >= 2) {
+                            const p0 = points[0];
+                            const p1 = points[1];
+                            startAngle = Math.atan2(p1.y - p0.y, p1.x - p0.x) + Math.PI;
+                        } else {
+                            startAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x) + Math.PI;
+                        }
+                    } else if (el.arrowType === 'curved') {
+                        const dx = toPoint.x - fromPoint.x;
+                        const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
+                        startAngle = Math.atan2(controlPoint1.y - fromPoint.y, controlPoint1.x - fromPoint.x) + Math.PI;
+                    } else {
+                        startAngle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x) + Math.PI;
+                    }
+
+                    ctx.beginPath();
+                    ctx.moveTo(fromPoint.x, fromPoint.y);
+                    ctx.lineTo(
+                        fromPoint.x - headLength * Math.cos(startAngle - Math.PI / 6),
+                        fromPoint.y - headLength * Math.sin(startAngle - Math.PI / 6)
+                    );
+                    ctx.moveTo(fromPoint.x, fromPoint.y);
+                    ctx.lineTo(
+                        fromPoint.x - headLength * Math.cos(startAngle + Math.PI / 6),
+                        fromPoint.y - headLength * Math.sin(startAngle + Math.PI / 6)
+                    );
+                    ctx.stroke();
                 }
 
-                ctx.beginPath();
-                ctx.moveTo(fromPoint.x, fromPoint.y);
-                ctx.lineTo(
-                    fromPoint.x - headLength * Math.cos(startAngle - Math.PI / 6),
-                    fromPoint.y - headLength * Math.sin(startAngle - Math.PI / 6)
-                );
-                ctx.moveTo(fromPoint.x, fromPoint.y);
-                ctx.lineTo(
-                    fromPoint.x - headLength * Math.cos(startAngle + Math.PI / 6),
-                    fromPoint.y - headLength * Math.sin(startAngle + Math.PI / 6)
-                );
-                ctx.stroke();
-            }
-
-            // Draw end arrow head
-            if (el.arrowHead === 'end' || el.arrowHead === 'both' || !el.arrowHead) {
-                ctx.beginPath();
-                ctx.moveTo(toPoint.x, toPoint.y);
-                ctx.lineTo(
-                    toPoint.x - headLength * Math.cos(endAngle - Math.PI / 6),
-                    toPoint.y - headLength * Math.sin(endAngle - Math.PI / 6)
-                );
-                ctx.moveTo(toPoint.x, toPoint.y);
-                ctx.lineTo(
-                    toPoint.x - headLength * Math.cos(endAngle + Math.PI / 6),
-                    toPoint.y - headLength * Math.sin(endAngle + Math.PI / 6)
-                );
-                ctx.stroke();
-            }
+                // Draw end arrow head
+                if (el.arrowHead === 'end' || el.arrowHead === 'both' || !el.arrowHead) {
+                    ctx.beginPath();
+                    ctx.moveTo(toPoint.x, toPoint.y);
+                    ctx.lineTo(
+                        toPoint.x - headLength * Math.cos(endAngle - Math.PI / 6),
+                        toPoint.y - headLength * Math.sin(endAngle - Math.PI / 6)
+                    );
+                    ctx.moveTo(toPoint.x, toPoint.y);
+                    ctx.lineTo(
+                        toPoint.x - headLength * Math.cos(endAngle + Math.PI / 6),
+                        toPoint.y - headLength * Math.sin(endAngle + Math.PI / 6)
+                    );
+                    ctx.stroke();
+                }
             } else if (el.type === 'rect') {
                 ctx.globalAlpha = el.opacity || 1;
                 if (el.backgroundColor) {
@@ -635,8 +635,8 @@ const Board = () => {
                     ctx.font = `${fontSize}px ${el.fontFamily || 'Arial'}`;
                     ctx.textAlign = el.textAlign || 'center';
                     ctx.textBaseline = 'middle';
-                    
-                    let textX = x + w/2;
+
+                    let textX = x + w / 2;
                     if (el.textAlign === 'left') textX = x + 10;
                     if (el.textAlign === 'right') textX = x + w - 10;
 
@@ -645,13 +645,13 @@ const Board = () => {
                         const lines = getWrappedLines(ctx, el.text, maxWidth);
                         const lineHeight = fontSize * 1.2;
                         const totalHeight = lines.length * lineHeight;
-                        let startY = y + h/2 - totalHeight/2 + lineHeight/2;
+                        let startY = y + h / 2 - totalHeight / 2 + lineHeight / 2;
 
                         lines.forEach((line, i) => {
                             ctx.fillText(line, textX, startY + i * lineHeight);
                         });
                     } else {
-                        ctx.fillText(el.text, textX, y + h/2);
+                        ctx.fillText(el.text, textX, y + h / 2);
                     }
                 }
 
@@ -702,7 +702,7 @@ const Board = () => {
                         const lines = getWrappedLines(ctx, el.text, maxWidth);
                         const lineHeight = fontSize * 1.2;
                         const totalHeight = lines.length * lineHeight;
-                        let startY = el.y - totalHeight/2 + lineHeight/2;
+                        let startY = el.y - totalHeight / 2 + lineHeight / 2;
 
                         lines.forEach((line, i) => {
                             ctx.fillText(line, textX, startY + i * lineHeight);
@@ -749,8 +749,22 @@ const Board = () => {
                         ctx.strokeRect(el.x, el.y, el.w || 200, el.h || 200);
                     }
                 }
+
+                if (tool === 'arrow' || isSelected) {
+                    getConnectionPoints(el).forEach(point => {
+                        const isHovered = hoveredConnectionPoint?.elementId === el.id &&
+                            hoveredConnectionPoint?.point.position === point.position;
+                        ctx.fillStyle = isHovered ? '#3b82f6' : '#60a5fa';
+                        ctx.beginPath();
+                        ctx.arc(point.x, point.y, isHovered ? 6 : 4, 0, 2 * Math.PI);
+                        ctx.fill();
+                        ctx.strokeStyle = 'white';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    });
+                }
             }
-            
+
             ctx.globalAlpha = 1;
 
             if (isSelected && (el.type === 'rect' || el.type === 'circle' || el.type === 'image')) {
@@ -879,7 +893,7 @@ const Board = () => {
                     ctx.font = `${el.fontSize || 16}px ${el.fontFamily || 'Arial'}`;
                     const textWidth = ctx.measureText(el.text || '').width;
                     const height = el.fontSize || 16;
-                    if (x >= el.x && x <= el.x + textWidth && y >= el.y - height && y <= el.y + height/2) {
+                    if (x >= el.x && x <= el.x + textWidth && y >= el.y - height && y <= el.y + height / 2) {
                         return el;
                     }
                 }
@@ -898,7 +912,7 @@ const Board = () => {
                         fromPoint = fromPoints.find(p => p.position === el.fromPoint?.position) || fromPoints[0];
                     }
                 }
-                
+
                 if (el.toId && el.toPoint) {
                     const toEl = elements.find(e => e.id === el.toId);
                     if (toEl) {
@@ -912,21 +926,21 @@ const Board = () => {
                         const points = getArrowPoints(el);
                         let hit = false;
                         for (let j = 0; j < points.length - 1; j++) {
-                            if (distanceToSegment({x, y}, points[j], points[j+1]) < 10) {
+                            if (distanceToSegment({ x, y }, points[j], points[j + 1]) < 10) {
                                 hit = true;
                                 break;
                             }
                         }
                         if (hit) return el;
                     } else if (el.arrowType === 'curved') {
-                         const dx = toPoint.x - fromPoint.x;
-                         const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
-                         const controlPoint2 = { x: toPoint.x - dx / 2, y: toPoint.y };
-                         if (distanceToBezier({x, y}, fromPoint, controlPoint1, controlPoint2, toPoint) < 10) {
-                             return el;
-                         }
+                        const dx = toPoint.x - fromPoint.x;
+                        const controlPoint1 = { x: fromPoint.x + dx / 2, y: fromPoint.y };
+                        const controlPoint2 = { x: toPoint.x - dx / 2, y: toPoint.y };
+                        if (distanceToBezier({ x, y }, fromPoint, controlPoint1, controlPoint2, toPoint) < 10) {
+                            return el;
+                        }
                     } else {
-                        if (distanceToSegment({x, y}, fromPoint, toPoint) < 10) return el;
+                        if (distanceToSegment({ x, y }, fromPoint, toPoint) < 10) return el;
                     }
                 }
             }
@@ -1026,7 +1040,7 @@ const Board = () => {
                         newY = y;
                         newH = bottom - y;
                     }
-                    
+
                     if (newW < 10) newW = 10;
                     if (newH < 10) newH = 10;
                 } else if (el.type === 'circle') {
@@ -1273,11 +1287,11 @@ const Board = () => {
             const selected = elements.filter(el => {
                 if (el.type === 'rect' || el.type === 'image') {
                     return el.x >= x && el.x + (el.w || 0) <= x + w &&
-                           el.y >= y && el.y + (el.h || 0) <= y + h;
+                        el.y >= y && el.y + (el.h || 0) <= y + h;
                 } else if (el.type === 'circle') {
                     const r = el.radius || 0;
                     return el.x - r >= x && el.x + r <= x + w &&
-                           el.y - r >= y && el.y + r <= y + h;
+                        el.y - r >= y && el.y + r <= y + h;
                 } else if (el.type === 'text') {
                     // Approximate text bounds
                     return el.x >= x && el.x <= x + w && el.y >= y && el.y <= y + h;
@@ -1455,16 +1469,16 @@ const Board = () => {
         const newElements = elements.map(el => {
             if (selectedElements.includes(el.id)) {
                 if (el.type === newType) return el;
-                
+
                 const updates: Partial<Element> = { type: newType };
-                
+
                 if (newType === 'circle' && el.type === 'rect') {
                     // Rect to Circle
                     const size = Math.min(el.w || 50, el.h || 50);
                     updates.radius = size / 2;
                     // Center it (Rect x,y is top-left, Circle x,y is center)
-                    updates.x = el.x + (el.w || 0)/2;
-                    updates.y = el.y + (el.h || 0)/2;
+                    updates.x = el.x + (el.w || 0) / 2;
+                    updates.y = el.y + (el.h || 0) / 2;
                 } else if (newType === 'rect' && el.type === 'circle') {
                     // Circle to Rect
                     const r = el.radius || 25;
@@ -1525,7 +1539,7 @@ const Board = () => {
         if (file && file.type.startsWith('image/')) {
             const { x, y } = getCanvasCoords(e as unknown as React.MouseEvent);
             const imageUrl = await uploadImage(file);
-            
+
             if (imageUrl) {
                 const newElement: Element = {
                     id: Date.now().toString(),
@@ -1563,11 +1577,11 @@ const Board = () => {
 
         const realSourceIndex = elements.length - 1 - draggedLayerIndex;
         const realTargetIndex = elements.length - 1 - targetIndex;
-        
+
         const newElements = [...elements];
         const [movedElement] = newElements.splice(realSourceIndex, 1);
         newElements.splice(realTargetIndex, 0, movedElement);
-        
+
         setElements(newElements);
         addToHistory(newElements);
         emitElements(newElements);
@@ -1575,25 +1589,25 @@ const Board = () => {
     };
 
     const handlersRef = useRef({
-        undo, redo, paste, setTool, setSelectedElements, 
-        copySelected, cutSelected, deleteSelected, handleImageUpload, 
+        undo, redo, paste, setTool, setSelectedElements,
+        copySelected, cutSelected, deleteSelected, handleImageUpload,
         setArrowStart, elements, clipboard, history, historyIndex
     });
-    
+
     handlersRef.current = {
-        undo, redo, paste, setTool, setSelectedElements, 
-        copySelected, cutSelected, deleteSelected, handleImageUpload, 
+        undo, redo, paste, setTool, setSelectedElements,
+        copySelected, cutSelected, deleteSelected, handleImageUpload,
         setArrowStart, elements, clipboard, history, historyIndex
     };
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-            
-            const { 
-                undo, redo, paste, setTool, setSelectedElements, 
-                copySelected, cutSelected, deleteSelected, handleImageUpload, 
-                setArrowStart, elements 
+
+            const {
+                undo, redo, paste, setTool, setSelectedElements,
+                copySelected, cutSelected, deleteSelected, handleImageUpload,
+                setArrowStart, elements
             } = handlersRef.current;
 
             if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
@@ -1711,7 +1725,7 @@ const Board = () => {
                         <span className="absolute right-1 bottom-1 text-[8px] font-bold opacity-70">V</span>
                         <span className="absolute left-full ml-2 px-2 py-1 bg-popover text-popover-foreground text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap pointer-events-none">Select</span>
                     </button>
-                    
+
                     <button
                         onClick={() => setTool('rect')}
                         className={`p-2 rounded relative group ${tool === 'rect' ? 'bg-primary text-primary-foreground' : 'hover:bg-secondary text-muted-foreground hover:text-foreground'}`}
@@ -1779,7 +1793,7 @@ const Board = () => {
 
             <div className="flex-1 relative">
                 <div className="absolute top-4 right-4 flex gap-2 z-10">
-                     <button
+                    <button
                         onClick={() => setTool('pan')}
                         className={`p-2 rounded border border-border shadow-sm ${tool === 'pan' ? 'bg-primary text-primary-foreground' : 'bg-card hover:bg-secondary text-muted-foreground'}`}
                         title="Pan (Space)"
@@ -1803,7 +1817,7 @@ const Board = () => {
                         </div>
                         <div className="overflow-y-auto flex-1 p-2 flex flex-col gap-1">
                             {elements.slice().reverse().map((el, i) => (
-                                <div 
+                                <div
                                     key={el.id}
                                     draggable
                                     onDragStart={(e) => handleLayerDragStart(e, i)}
@@ -1814,7 +1828,7 @@ const Board = () => {
                                 >
                                     {getIconForType(el.type)}
                                     <span className="truncate flex-1">{el.text || el.type + ' ' + (elements.length - 1 - i)}</span>
-                                    <button 
+                                    <button
                                         onClick={(e) => { e.stopPropagation(); toggleVisibility(el.id); }}
                                         className="opacity-0 group-hover:opacity-100 hover:text-foreground text-muted-foreground"
                                     >
@@ -1853,7 +1867,7 @@ const Board = () => {
                 {editingElementId && (() => {
                     const el = elements.find(e => e.id === editingElementId);
                     if (!el) return null;
-                    
+
                     const style: React.CSSProperties = {
                         position: 'absolute',
                         left: (el.type === 'circle' ? (el.x - (el.radius || 0)) : el.x) * zoom + panOffset.x,
@@ -1880,7 +1894,7 @@ const Board = () => {
                             autoFocus
                             value={el.text || ''}
                             onChange={(e) => {
-                                const newElements = elements.map(element => 
+                                const newElements = elements.map(element =>
                                     element.id === el.id ? { ...element, text: e.target.value } : element
                                 );
                                 setElements(newElements);
@@ -1905,7 +1919,7 @@ const Board = () => {
                 })()}
 
                 {contextMenu && (
-                    <div 
+                    <div
                         className="absolute bg-card border border-border rounded shadow-lg p-1 z-50 flex flex-col min-w-[200px]"
                         style={{ left: contextMenu.x, top: contextMenu.y }}
                     >
@@ -1924,15 +1938,15 @@ const Board = () => {
                         <button onClick={() => setSelectedElements(elements.map(e => e.id))} className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
                             <MousePointer size={14} /> <span>Select all</span> <span className="ml-auto text-muted-foreground">Ctrl A</span>
                         </button>
-                        
+
                         <div className="h-px bg-border my-1" />
-                        
+
                         <button className="flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left opacity-50 cursor-not-allowed">
                             <Download size={14} /> <span>Export selection</span>
                         </button>
-                        
+
                         <div className="h-px bg-border my-1" />
-                        
+
                         <div className="relative group/order">
                             <button className="w-full flex items-center gap-2 p-2 hover:bg-secondary rounded text-xs text-left">
                                 <BringToFront size={14} /> <span>Change Order</span> <ArrowRight size={12} className="ml-auto" />
@@ -1943,7 +1957,7 @@ const Board = () => {
                                     const idx = elements.findIndex(e => e.id === contextMenu.elementId);
                                     if (idx < elements.length - 1) {
                                         const newEls = [...elements];
-                                        [newEls[idx], newEls[idx+1]] = [newEls[idx+1], newEls[idx]];
+                                        [newEls[idx], newEls[idx + 1]] = [newEls[idx + 1], newEls[idx]];
                                         setElements(newEls);
                                         emitElements(newEls);
                                     }
@@ -1955,7 +1969,7 @@ const Board = () => {
                                     const idx = elements.findIndex(e => e.id === contextMenu.elementId);
                                     if (idx > 0) {
                                         const newEls = [...elements];
-                                        [newEls[idx], newEls[idx-1]] = [newEls[idx-1], newEls[idx]];
+                                        [newEls[idx], newEls[idx - 1]] = [newEls[idx - 1], newEls[idx]];
                                         setElements(newEls);
                                         emitElements(newEls);
                                     }
@@ -2001,15 +2015,15 @@ const Board = () => {
                                 <div className="h-px bg-border my-1" />
                                 <div className="text-[10px] font-bold px-2 py-1 text-muted-foreground">ARROW STYLE</div>
                                 <div className="flex gap-1 px-2">
-                                    <button 
+                                    <button
                                         onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'straight' })}
                                         className="p-1 hover:bg-secondary rounded text-xs border border-border flex-1 text-center"
                                     >Straight</button>
-                                    <button 
+                                    <button
                                         onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'elbow' })}
                                         className="p-1 hover:bg-secondary rounded text-xs border border-border flex-1 text-center"
                                     >Elbow</button>
-                                    <button 
+                                    <button
                                         onClick={() => updateArrowStyle(contextMenu.elementId, { arrowType: 'curved' })}
                                         className="p-1 hover:bg-secondary rounded text-xs border border-border flex-1 text-center"
                                     >Curved</button>
@@ -2027,7 +2041,7 @@ const Board = () => {
                                 className="p-2 hover:bg-secondary rounded border border-border"
                                 title="Stroke Color"
                             >
-                                <div 
+                                <div
                                     className="w-4 h-4 rounded-full border border-gray-500"
                                     style={{ backgroundColor: elements.find(el => el.id === selectedElements[0])?.color || '#ffffff' }}
                                 />
@@ -2049,7 +2063,7 @@ const Board = () => {
                                     className="p-2 hover:bg-secondary rounded border border-border"
                                     title="Background Color"
                                 >
-                                    <div 
+                                    <div
                                         className="w-4 h-4 rounded-sm border border-gray-500"
                                         style={{ backgroundColor: elements.find(el => el.id === selectedElements[0])?.backgroundColor || 'transparent' }}
                                     />
@@ -2063,7 +2077,7 @@ const Board = () => {
                                             onBlur={(e) => updateSelectedElements({ backgroundColor: e.target.value })}
                                             className="w-24 h-6 cursor-pointer"
                                         />
-                                        <button 
+                                        <button
                                             onClick={() => updateSelectedElements({ backgroundColor: undefined })}
                                             className="text-xs text-red-500 hover:underline"
                                         >
@@ -2106,7 +2120,7 @@ const Board = () => {
                                                 className="flex-1 h-6 cursor-pointer"
                                             />
                                         </div>
-                                        
+
                                         <div className="w-full h-px bg-border" />
 
                                         {/* Font Size */}
@@ -2196,7 +2210,7 @@ const Board = () => {
                                         <Circle size={16} />
                                     </button>
                                 </div>
-                                
+
                                 <div className="flex items-center gap-1 px-1">
                                     <Minus size={14} className="text-muted-foreground" />
                                     <input
