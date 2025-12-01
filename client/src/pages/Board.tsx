@@ -855,7 +855,7 @@ const Board = () => {
                     endPoint: !endId ? { x: end.x, y: end.y } : undefined,
                     color: currentColor,
                     arrowHead: tool === 'line' ? 'none' : 'end',
-                    arrowType: tool === 'line' ? 'straight' : 'straight'
+                    arrowType: tool === 'line' ? 'straight' : 'curved'
                 };
                 const newElements = [...elements, newElement];
                 setElements(newElements);

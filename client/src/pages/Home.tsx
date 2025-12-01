@@ -135,11 +135,6 @@ const Home = () => {
                         </Link>
                     </div>
                 </motion.div>
-
-                {/* Footer */}
-                <footer className="mt-24 pt-8 border-t border-border text-center text-muted-foreground text-sm">
-                    <p>&copy; {new Date().getFullYear()} Uniboard. All rights reserved.</p>
-                </footer>
             </div>
         </div>
     );
