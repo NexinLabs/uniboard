@@ -111,10 +111,13 @@ const Board = () => {
     const [inviteRole, setInviteRole] = useState<'viewer' | 'editor'>('viewer');
     const [activeCollaboratorMenu, setActiveCollaboratorMenu] = useState<string | null>(null);
     const [availableIcons, setAvailableIcons] = useState<any[]>([]);
-    const [iconsLoading, setIconsLoading] = useState(true);
 
 
     useEffect(() => {
+        
+        // initialize for future use
+        availableIcons
+        
         const fetchBoard = async () => {
             if (!user) return;
             try {
@@ -185,10 +188,8 @@ const Board = () => {
             try {
                 const res = await api.get('/api/icons/me/icons');
                 setAvailableIcons(res.data);
-                setIconsLoading(false);
             } catch (err) {
                 console.error('Failed to fetch icons:', err);
-                setIconsLoading(false);
             }
         };
         if (user) fetchIcons();
@@ -1276,28 +1277,28 @@ const Board = () => {
         }
     };
 
-    const insertIcon = (iconPath: string, iconName: string) => {
-        if (isReadOnly()) return;
-        const canvasRect = canvasRef.current?.getBoundingClientRect();
-        const centerX = canvasRect ? (canvasRect.width / 2 - panOffset.x) / zoom : 400;
-        const centerY = canvasRect ? (canvasRect.height / 2 - panOffset.y) / zoom : 300;
-        const newElement: Element = {
-            id: Date.now().toString(),
-            type: 'image',
-            x: centerX - 50,
-            y: centerY - 50,
-            w: 100,
-            h: 100,
-            imageUrl: iconPath, // Use the file path directly
-            color: currentColor,
-            text: iconName,
-        };
-        const newElements = [...elements, newElement];
-        setElements(newElements);
-        addToHistory(newElements);
-        emitElements(newElements);
-        setSelectedElements([newElement.id]);
-    };
+    // const insertIcon = (iconPath: string, iconName: string) => {
+    //     if (isReadOnly()) return;
+    //     const canvasRect = canvasRef.current?.getBoundingClientRect();
+    //     const centerX = canvasRect ? (canvasRect.width / 2 - panOffset.x) / zoom : 400;
+    //     const centerY = canvasRect ? (canvasRect.height / 2 - panOffset.y) / zoom : 300;
+    //     const newElement: Element = {
+    //         id: Date.now().toString(),
+    //         type: 'image',
+    //         x: centerX - 50,
+    //         y: centerY - 50,
+    //         w: 100,
+    //         h: 100,
+    //         imageUrl: iconPath, // Use the file path directly
+    //         color: currentColor,
+    //         text: iconName,
+    //     };
+    //     const newElements = [...elements, newElement];
+    //     setElements(newElements);
+    //     addToHistory(newElements);
+    //     emitElements(newElements);
+    //     setSelectedElements([newElement.id]);
+    // };
 
     const handleInvite = async () => {
         if (!inviteEmail) return;

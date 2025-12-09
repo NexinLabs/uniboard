@@ -6,8 +6,6 @@ import {
     Send,
     Loader2,
     CheckCircle2,
-    MapPin,
-    Phone,
     Clock
 } from 'lucide-react';
 
