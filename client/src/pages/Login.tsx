@@ -3,7 +3,7 @@ import { AuthContext } from '../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../utils/api';
 import { motion } from 'framer-motion';
-import { Mail, Lock, LogIn, ArrowRight } from 'lucide-react';
+import { Mail, Lock, ArrowRight } from 'lucide-react';
 
 const Login = () => {
     const [credentials, setCredentials] = useState({ email: "", password: "" });
@@ -36,7 +36,7 @@ const Login = () => {
                 <div className="bg-card border border-border rounded-2xl shadow-xl overflow-hidden">
                     <div className="p-8">
                         <div className="text-center mb-8">
-                            <h2 className="text-3xl font-bold bg-gradient-to-r from-primary to-blue-400 bg-clip-text text-transparent mb-2">
+                            <h2 className="text-3xl font-bold bg-linear-to-r from-primary to-blue-400 bg-clip-text text-transparent mb-2">
                                 Welcome Back
                             </h2>
                             <p className="text-muted-foreground">
